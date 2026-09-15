@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Node
+node_modules/
+dist/
+build/
+
+# Piston generated compiler packages
+compiler-project/backend/data/piston/packages/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
