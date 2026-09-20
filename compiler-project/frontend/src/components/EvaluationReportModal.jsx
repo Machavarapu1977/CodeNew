@@ -98,6 +98,20 @@ export default function EvaluationReportModal({
     ? Math.round(timeTakenSeconds / totalQuestions)
     : Math.round(timeTakenSeconds / Math.max(1, Object.keys(questionSubmissions).length));
 
+  // ── Composite Performance Score ──────────────────────────────────────────
+  // Weighted: 60% solve rate + 40% test-case accuracy.
+  // This prevents a student who solved only 1 out of 3 questions (but with
+  // 100% test-case accuracy on that one question) from reaching "Proficient".
+  //   e.g. 1/3 solved + 100% accuracy → composite = (33×0.6)+(100×0.4) = 59.8 → Intermediate
+  //        2/3 solved + 75% accuracy  → composite = (66.7×0.6)+(75×0.4)  = 70  → Proficient
+  //        3/3 solved + 90% accuracy  → Outstanding
+  const compositeScore = Math.round((solvedPercentage * 0.6) + (overallAccuracy * 0.4));
+
+  // "Penalized accuracy" accounts for unsolved questions.
+  // A student who solved 1/3 with 100% test accuracy actually has ~33% effective accuracy
+  // across the whole assessment — not 100%. Used in suggestions below.
+  const penalizedAccuracy = Math.round((overallAccuracy * solvedPercentage) / 100);
+
   // Determine Performance Tier
   let performanceTier = 'Needs Practice';
   let tierColor = '#ef4444';
@@ -105,21 +119,25 @@ export default function EvaluationReportModal({
   let scoreColorClass = 'score-red';
 
   if (solvedPercentage === 100 && overallAccuracy >= 85) {
+    // All questions solved AND high accuracy on test cases
     performanceTier = 'Outstanding';
     tierColor = '#16a34a';
     tierBadge = '🏆 Master Level';
     scoreColorClass = 'score-green';
-  } else if (solvedPercentage >= 65 || overallAccuracy >= 70) {
+  } else if (compositeScore >= 65) {
+    // Strong combined performance: most questions solved AND decent accuracy
     performanceTier = 'Good Performance';
     tierColor = '#2563eb';
     tierBadge = '🌟 Proficient';
     scoreColorClass = 'score-blue';
-  } else if (solvedPercentage >= 35) {
+  } else if (compositeScore >= 35) {
+    // Some meaningful progress: partial solve rate with some accuracy
     performanceTier = 'Fair Effort';
     tierColor = '#d97706';
     tierBadge = '⚡ Intermediate';
     scoreColorClass = 'score-amber';
   }
+  // else: compositeScore < 35 → stays 'Needs Practice'
 
   // Dynamic suggestions generation
   const suggestions = useMemo(() => {
@@ -145,19 +163,28 @@ export default function EvaluationReportModal({
     }
 
     // 2. Accuracy & Edge Cases Suggestion
-    if (overallAccuracy < 80) {
+    // Use penalizedAccuracy so that solving 1/3 questions perfectly doesn't
+    // generate a misleading "strong accuracy" message for the whole assessment.
+    if (penalizedAccuracy < 60) {
       list.push({
         type: 'accuracy',
         icon: '🛡️',
         title: 'Defensive Coding & Boundary Case Validation',
-        desc: `Your test case accuracy was ${overallAccuracy}%. Common failures stem from edge cases like empty inputs, boundary values (0, negative numbers, maximum array bounds), and off-by-one indices. Always trace through minimal edge cases manually before submitting.`
+        desc: `Your effective assessment accuracy was ${penalizedAccuracy}% (test cases passed across all questions). Common failures stem from edge cases like empty inputs, boundary values (0, negative numbers, maximum array bounds), and off-by-one indices. Always trace through minimal edge cases manually before submitting.`
+      });
+    } else if (penalizedAccuracy < 85) {
+      list.push({
+        type: 'accuracy',
+        icon: '🔧',
+        title: 'Refine Edge Case Handling',
+        desc: `You achieved ${penalizedAccuracy}% effective accuracy across the assessment. A few edge cases or unsolved questions are holding you back. Carefully validate inputs at boundaries and ensure every question receives at least a partial attempt.`
       });
     } else {
       list.push({
         type: 'accuracy',
         icon: '✨',
         title: 'High Precision & Solution Robustness',
-        desc: `Strong accuracy of ${overallAccuracy}%! Your solutions handled both public and hidden test cases effectively with minimal execution anomalies.`
+        desc: `Strong overall accuracy of ${penalizedAccuracy}%! Your solutions handled both public and hidden test cases effectively across all questions, with minimal execution anomalies.`
       });
     }
 
@@ -197,7 +224,8 @@ export default function EvaluationReportModal({
     });
 
     return list;
-  }, [questions, solvedQuestionIds, overallAccuracy, timeTakenSeconds, totalDurationMinutes, avgTimePerQuestion, solvedPercentage]);
+  }, [questions, solvedQuestionIds, penalizedAccuracy, timeTakenSeconds, totalDurationMinutes, avgTimePerQuestion, solvedPercentage]);
+
 
   const handlePrint = () => {
     window.print();

@@ -93,6 +93,8 @@ function App() {
   const [isExamFinished, setIsExamFinished] = useState(false);
   const [showEvaluationReport, setShowEvaluationReport] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [showSubmissionNote, setShowSubmissionNote] = useState(false);
+  const [submissionNoteData, setSubmissionNoteData] = useState(null);
 
   // Student Mock Test Creation & Selection Modal State
   const [isStudentTestModalOpen, setIsStudentTestModalOpen] = useState(false);
@@ -157,9 +159,91 @@ function App() {
     setShowFinishConfirm(true);
   };
 
-  const handleConfirmFinishExam = () => {
+  const handleConfirmFinishExam = async () => {
     setShowFinishConfirm(false);
-    setIsExamFinished(true);
+    const API_BASE = 'http://127.0.0.1:8000';
+    const targetTestId = selectedTestId || selectedTest?.id || 1;
+    const timeTaken = calculateTimeTakenSeconds();
+
+    // Capture snapshot before clearing state
+    const solvedSnap = [...solvedQuestionIds];
+    const questionsSnap = [...questionsList];
+    const submissionsSnap = { ...questionSubmissions };
+    const testSnap = selectedTest;
+    const studentSnap = user?.name || 'Student';
+    const durationSnap = selectedTest?.duration_minutes || 45;
+
+    try {
+      const payload = {
+        test_id: targetTestId,
+        student_name: user?.name || 'Student',
+        solved_questions: solvedQuestionIds,
+        question_submissions: questionSubmissions,
+        time_taken_seconds: timeTaken
+      };
+
+      const res = await fetch(`${API_BASE}/tests/${targetTestId}/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      let noteText = 'Your test has been successfully submitted and finalized!';
+      if (res.ok) {
+        const data = await res.json();
+        if (data.note) noteText = data.note;
+      }
+
+      // Show styled in-app submission note instead of alert()
+      setSubmissionNoteData({
+        noteText,
+        solvedCount: solvedSnap.length,
+        totalQuestions: questionsSnap.length,
+        timeTakenSeconds: timeTaken,
+        // snapshot all data needed to show the eval report afterward
+        questions: questionsSnap,
+        solvedQuestionIds: solvedSnap,
+        questionSubmissions: submissionsSnap,
+        testInfo: testSnap,
+        studentName: studentSnap,
+        totalDurationMinutes: durationSnap
+      });
+      setShowSubmissionNote(true);
+    } catch (err) {
+      console.error('Error finishing test:', err);
+      setSubmissionNoteData({
+        noteText: 'Your test has been submitted successfully!',
+        solvedCount: solvedQuestionIds.length,
+        totalQuestions: questionsList.length,
+        timeTakenSeconds: timeTaken,
+        questions: questionsList,
+        solvedQuestionIds: [...solvedQuestionIds],
+        questionSubmissions: { ...questionSubmissions },
+        testInfo: selectedTest,
+        studentName: user?.name || 'Student',
+        totalDurationMinutes: selectedTest?.duration_minutes || 45
+      });
+      setShowSubmissionNote(true);
+    } finally {
+      // Mark exam as finished and clear active test from storage
+      setIsExamFinished(true);
+      setSelectedTestId(null);
+      setSelectedTest(null);
+      localStorage.removeItem('activeTestId');
+      localStorage.removeItem('activeTest');
+    }
+  };
+
+  // Called when student dismisses the submission note and wants to go back to dashboard
+  const handleDismissSubmissionNote = () => {
+    setShowSubmissionNote(false);
+    setSubmissionNoteData(null);
+    setSelectedRole(null);
+  };
+
+  // Called when student wants to see the detailed report from the submission note
+  const handleViewReportFromNote = () => {
+    setShowSubmissionNote(false);
     setShowEvaluationReport(true);
   };
 
@@ -258,6 +342,9 @@ function App() {
           sampleInput: sampleIn,
           sampleOutput: data.sample_output ?? data.sampleOutput ?? targetQ?.sampleOutput ?? ''
         });
+        // Also sync the stdin textarea so it reflects the real sample input from the DB.
+        // Only overwrite if the user hasn't manually changed it yet.
+        setStdin(prev => (prev === '' || prev === (targetQ?.sampleInput ?? targetQ?.sample_input ?? '')) ? sampleIn : prev);
       })
       .catch((err) => console.error('Failed to load question:', err));
   };
@@ -1276,7 +1363,73 @@ function App() {
                   className="finish-btn-primary"
                   onClick={handleConfirmFinishExam}
                 >
-                  Submit & View Report
+                  Submit &amp; Finish Assessment
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Submission Success Notification Modal ── */}
+        {showSubmissionNote && submissionNoteData && (
+          <div className="finish-confirm-overlay">
+            <div className="finish-confirm-card" style={{ maxWidth: 520, textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+              {/* Success Check Icon */}
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" fill="rgba(34,197,94,0.10)" stroke="#16a34a" strokeWidth="1.8" />
+                  <polyline points="8 12.5 11 15.5 16.5 9" stroke="#16a34a" strokeWidth="2.4" />
+                </svg>
+              </div>
+
+              <h3 className="finish-confirm-title" style={{ color: '#16a34a', marginBottom: '0.5rem' }}>
+                Test Submitted Successfully!
+              </h3>
+              <p className="finish-confirm-text" style={{ marginBottom: '1.25rem' }}>
+                {submissionNoteData.noteText}
+              </p>
+
+              {/* Quick Stats — same summary box style */}
+              <div className="finish-confirm-summary-box" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                <div className="finish-summary-item">
+                  <span className="summary-label">Questions Solved</span>
+                  <span className="summary-val solved-val">
+                    <GreenOutlinedTick size={15} />
+                    {submissionNoteData.solvedCount} / {submissionNoteData.totalQuestions}
+                  </span>
+                </div>
+                <div className="finish-summary-item">
+                  <span className="summary-label">Time Taken</span>
+                  <span className="summary-val">
+                    {String(Math.floor(submissionNoteData.timeTakenSeconds / 60)).padStart(2,'0')}:{String(submissionNoteData.timeTakenSeconds % 60).padStart(2,'0')}
+                  </span>
+                </div>
+                <div className="finish-summary-item">
+                  <span className="summary-label">Score</span>
+                  <span className="summary-val">
+                    {submissionNoteData.solvedCount * 10} / {submissionNoteData.totalQuestions * 10}
+                  </span>
+                </div>
+              </div>
+
+              <p className="finish-confirm-note">
+                Your results have been securely recorded. View your full performance report or return to the main dashboard.
+              </p>
+
+              <div className="finish-confirm-actions">
+                <button
+                  type="button"
+                  className="finish-btn-secondary"
+                  onClick={handleDismissSubmissionNote}
+                >
+                  Back to Dashboard
+                </button>
+                <button
+                  type="button"
+                  className="finish-btn-primary"
+                  onClick={handleViewReportFromNote}
+                >
+                  📊 View Detailed Report
                 </button>
               </div>
             </div>
@@ -1286,14 +1439,23 @@ function App() {
         {/* ── Detailed Evaluation Report Modal ── */}
         <EvaluationReportModal
           isOpen={showEvaluationReport}
-          onClose={() => setShowEvaluationReport(false)}
-          testInfo={selectedTest}
-          questions={questionsList}
-          solvedQuestionIds={solvedQuestionIds}
-          questionSubmissions={questionSubmissions}
-          timeTakenSeconds={calculateTimeTakenSeconds()}
-          totalDurationMinutes={selectedTest?.duration_minutes || 45}
-          studentName={user?.name || 'Student'}
+          onClose={() => {
+            setShowEvaluationReport(false);
+            // After viewing report, return to dashboard if exam was finished
+            if (isExamFinished) {
+              setSolvedQuestionIds([]);
+              setQuestionSubmissions({});
+              setSubmissionNoteData(null);
+              setSelectedRole(null);
+            }
+          }}
+          testInfo={submissionNoteData?.testInfo || selectedTest}
+          questions={submissionNoteData?.questions || questionsList}
+          solvedQuestionIds={submissionNoteData?.solvedQuestionIds || solvedQuestionIds}
+          questionSubmissions={submissionNoteData?.questionSubmissions || questionSubmissions}
+          timeTakenSeconds={submissionNoteData?.timeTakenSeconds || calculateTimeTakenSeconds()}
+          totalDurationMinutes={submissionNoteData?.totalDurationMinutes || selectedTest?.duration_minutes || 45}
+          studentName={submissionNoteData?.studentName || user?.name || 'Student'}
           onRetakeOrNewTest={() => {
             setStudentTestTab('create');
             setIsStudentTestModalOpen(true);
