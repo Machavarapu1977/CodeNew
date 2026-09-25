@@ -19,6 +19,70 @@ _last_piston_check = 0.0
 _piston_online = False
 _compiled_cache: Dict[tuple, str] = {}
 
+# Patch header injected at the top of every Python submission.
+# Makes common built-ins (sum, min, max, abs, round, pow, len) tolerate being
+# called with multiple scalar arguments the way students naturally write them,
+# e.g. sum(a, b) instead of sum([a, b]), without breaking correct usage.
+# NOTE: We deliberately avoid calling len() inside the patched functions to
+#       prevent infinite recursion (since len itself is also being patched).
+#       We use args.__len__() (the raw C slot) instead.
+_PYTHON_BUILTINS_PATCH = '''
+import builtins as _builtins
+# Capture originals before any patching
+_orig_sum   = _builtins.sum
+_orig_min   = _builtins.min
+_orig_max   = _builtins.max
+_orig_abs   = _builtins.abs
+_orig_len   = _builtins.len
+_orig_pow   = _builtins.pow
+_orig_round = _builtins.round
+
+def _patched_sum(*args, **kwargs):
+    # Try the standard call first; only fall back if it raises TypeError
+    try:
+        return _orig_sum(*args, **kwargs)
+    except TypeError:
+        # sum(a, b, c, ...) where args are scalars — add them all
+        total = args[0]
+        for _v in args[1:]:
+            total = total + _v
+        return total
+_builtins.sum = _patched_sum
+
+def _patched_min(*args, **kwargs):
+    try:
+        return _orig_min(*args, **kwargs)
+    except TypeError:
+        # min(a, b, c, ...) passed as scalars wrapped in a single non-iterable
+        return _orig_min(args, **kwargs)
+_builtins.min = _patched_min
+
+def _patched_max(*args, **kwargs):
+    try:
+        return _orig_max(*args, **kwargs)
+    except TypeError:
+        return _orig_max(args, **kwargs)
+_builtins.max = _patched_max
+
+def _patched_abs(*args, **kwargs):
+    # abs always takes one argument; just forward
+    return _orig_abs(args[0] if args else 0)
+_builtins.abs = _patched_abs
+
+def _patched_len(*args, **kwargs):
+    # len always takes one argument; just forward
+    return _orig_len(args[0])
+_builtins.len = _patched_len
+
+def _patched_pow(*args, **kwargs):
+    return _orig_pow(*args, **kwargs)
+_builtins.pow = _patched_pow
+
+def _patched_round(*args, **kwargs):
+    return _orig_round(*args, **kwargs)
+_builtins.round = _patched_round
+'''
+
 # Mapping of known languages to (piston_name, version).
 PISTON_RUNTIMES: Dict[str, tuple] = {
     "python": ("python", "3.12.0"),
@@ -37,13 +101,144 @@ def _piston_runtime(language: str) -> tuple:
     key = language.lower().strip()
     return PISTON_RUNTIMES.get(key, (key, "*"))
 
+def clean_and_normalize_stdin(code: str, language: str, stdin: str) -> str:
+    """Normalize dynamic inputs across all formats (LeetCode arrays, comma-separated,
+    variable assignments, multi-line) into standardized stdin lines for any programming language."""
+    if stdin is None:
+        return ""
+
+    raw = str(stdin).replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not raw:
+        return ""
+
+    import re
+    import ast
+
+    lines = raw.split("\n")
+
+    # 1. Whole-input argument tuple or variable assignments parsing
+    # E.g. " [2,-1,2], 3" or "nums = [2,-1,2], k = 3" or "[1,12,-5,-6,50,3], 4"
+    cleaned = re.sub(r'(?:^|,\s*)[A-Za-z_][A-Za-z0-9_]*\s*=', ',', raw)
+    if cleaned.startswith(','):
+        cleaned = cleaned[1:].strip()
+
+    parsed_tuple = None
+    try:
+        parsed_tuple = ast.literal_eval(cleaned)
+    except Exception:
+        try:
+            parsed_tuple = ast.literal_eval(f"({cleaned})")
+        except Exception:
+            pass
+
+    if parsed_tuple is not None and (isinstance(parsed_tuple, tuple) or (isinstance(parsed_tuple, (list, set)) and len(lines) <= 1)):
+        args = list(parsed_tuple) if isinstance(parsed_tuple, tuple) else [parsed_tuple]
+        out_lines = []
+        for arg in args:
+            if isinstance(arg, (list, tuple, set)):
+                if all(not isinstance(x, (list, dict, set, tuple)) for x in arg):
+                    out_lines.append(" ".join(str(x) for x in arg))
+                else:
+                    out_lines.append(str(arg))
+            else:
+                out_lines.append(str(arg))
+        normalized = "\n".join(out_lines) + "\n"
+        return normalized
+
+    # 2. Line-by-line parsing fallback for multi-line inputs
+    def _expand_literal(val: str) -> str:
+        """Convert a list/tuple/set literal like '[1,12,-5]' → '1 12 -5'."""
+        v = val.strip().rstrip(",").strip()
+        if v and v[0] in ("[", "(", "{"):
+            try:
+                parsed = ast.literal_eval(v)
+                if isinstance(parsed, (list, tuple, set, frozenset)):
+                    return " ".join(str(x) for x in parsed)
+            except Exception:
+                nums = re.findall(r'-?\d+(?:\.\d+)?', v)
+                if nums:
+                    return " ".join(nums)
+        return v
+
+    parsed_lines = []
+    for line in lines:
+        s = line.strip().rstrip(",").strip()
+        if not s:
+            continue
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$', s)
+        if m and not s.startswith(("{", "[", "(")):
+            var_name = m.group(1)
+            val = m.group(2).strip().rstrip(",").strip()
+            parsed_lines.append((var_name, _expand_literal(val)))
+        else:
+            parsed_lines.append((None, _expand_literal(s)))
+
+    # Reorder lines if all had variable-assignment format
+    all_named = parsed_lines and all(p[0] is not None for p in parsed_lines)
+    if all_named and len(parsed_lines) > 1:
+        code_var_order = []
+        for m in re.finditer(
+            r'([A-Za-z_][A-Za-z0-9_,\s]*?)\s*=\s*'
+            r'(?:int\s*\(|float\s*\(|str\s*\(|list\s*\(|(?:map\s*\([^,]+,\s*))?'
+            r'input\s*\(',
+            code
+        ):
+            for name in m.group(1).split(','):
+                name = name.strip()
+                if name and name not in code_var_order:
+                    code_var_order.append(name)
+
+        if code_var_order:
+            var_to_entry = {p[0]: p for p in parsed_lines}
+            reordered = []
+            for var in code_var_order:
+                if var in var_to_entry:
+                    reordered.append(var_to_entry.pop(var))
+            reordered.extend(var_to_entry.values())
+            parsed_lines = reordered
+
+    normalized = "\n".join(p[1] for p in parsed_lines)
+
+    lower_lang = language.lower().strip()
+    if lower_lang in ("python", "python3"):
+        count_inputs = len(re.findall(r'\binput\s*\(', code))
+        has_loop_input = bool(re.search(r'(for|while)\b[^\n]*:[\s\S]*?\binput\s*\(', code))
+        has_split_call = bool(re.search(r'input\s*\(\s*\)\.split', code))
+
+        if (not has_split_call
+                and (count_inputs > 1 or has_loop_input)
+                and "\n" not in normalized.strip()
+                and " " in normalized.strip()):
+            normalized = "\n".join(normalized.strip().split())
+
+        if has_split_call:
+            norm_lines = normalized.strip().split("\n")
+            total_inputs = count_inputs
+            if len(norm_lines) > total_inputs > 0:
+                consumed = total_inputs - 1
+                tail_lines = norm_lines[consumed:]
+                if all(len(ln.strip().split()) <= 1 for ln in tail_lines if ln.strip()):
+                    joined_tail = " ".join(ln.strip() for ln in tail_lines if ln.strip())
+                    normalized = "\n".join(norm_lines[:consumed] + [joined_tail])
+
+    if normalized and not normalized.endswith("\n"):
+        normalized += "\n"
+
+    return normalized
+
+
 async def execute_code(language: str, code: str, stdin: str = "") -> Dict[str, Optional[str]]:
     """Execute code via Piston API with fast failover to local fallback runtimes."""
     global _last_piston_check, _piston_online
 
+    stdin = clean_and_normalize_stdin(code, language, stdin)
+
     lower = language.lower().strip()
     if lower in ("python", "python3"):
         code = _prepare_python_code(code)
+        # Always inject built-ins compatibility patch for every Python execution,
+        # even plain scripts without function definitions
+        code = _inject_builtins_patch(code)
 
     now = time.time()
 
@@ -249,29 +444,88 @@ async def _run_local_sql(code: str, stdin: str) -> Dict[str, Optional[str]]:
         return {"output": "", "error": f"SQL execution error: {ex}"}
 
 
+def _inject_builtins_patch(code: str) -> str:
+    """Prepend the built-ins compatibility patch to Python code so common built-ins
+    (sum, min, max, abs, len) work even when called with multiple scalar arguments."""
+    # Avoid double-injection
+    if '_patched_sum' in code or '_BUILTINS_PATCHED' in code:
+        return code
+    return _PYTHON_BUILTINS_PATCH + '\n' + code
+
+
 def _prepare_python_code(code: str) -> str:
-    """Ensure Python starter code containing `def solve(...)` executes consistently across all questions."""
-    if not code or "def solve" not in code:
+    """Ensure Python starter code containing functions executes properly with dynamic and static inputs."""
+    if not code:
         return code
 
     import re
-    if "if __name__" in code or re.search(r'^\s*print\s*\(\s*solve\b', code, re.MULTILINE) or re.search(r'^\s*solve\s*\(', code, re.MULTILINE):
+
+    # If code already defines its own entry point, do not touch
+    if "if __name__" in code:
         return code
 
-    wrapper = """
+    # Check if code reads input directly from stdin via input() or sys.stdin
+    uses_dynamic_input = bool(re.search(r'\binput\s*\(', code) or "sys.stdin" in code)
+
+    # Find top-level function definitions (e.g. solve, climb_stairs, binary_search, etc.)
+    func_matches = re.findall(r'^\s*def\s+([A-Za-z0-9_]+)\s*\((.*?)\):', code, re.MULTILINE)
+    if not func_matches:
+        return code
+
+    # Pick target function (prefer 'solve' if present, else the last defined function)
+    target_func = None
+    target_params = ""
+    for name, params in func_matches:
+        if name == "solve":
+            target_func = name
+            target_params = params.strip()
+            break
+    if not target_func:
+        target_func, target_params = func_matches[-1]
+        target_params = target_params.strip()
+
+    # If the user already invokes the function, do not add another call
+    if re.search(rf'^\s*(?:print\s*\(\s*)?{target_func}\s*\(', code, re.MULTILINE):
+        return code
+
+    # If code uses dynamic input (e.g. input()):
+    if uses_dynamic_input:
+        # If target function takes 0 parameters (e.g. def solve():), invoke it directly without touching sys.stdin:
+        if not target_params:
+            wrapper = f"\n\nif __name__ == '__main__':\n    {target_func}()\n"
+            return _inject_builtins_patch(code + wrapper)
+        # If it takes parameters and uses dynamic input, inject the patch but don't hijack sys.stdin
+        return _inject_builtins_patch(code)
+
+    # If function takes 0 parameters and does not use dynamic input, invoke and print if returned:
+    if not target_params:
+        wrapper = f"""
+
+if __name__ == '__main__':
+    _res = {target_func}()
+    if _res is not None:
+        print(_res)
+"""
+        return _inject_builtins_patch(code + wrapper)
+
+    # Parameter-based function: Parse stdin into function arguments and invoke function
+    wrapper = f"""
 
 # --- Starter Python Code Execution Wrapper ---
 if __name__ == '__main__':
-    import sys, ast, inspect, json
+    import sys, ast, inspect, json, re
 
-    if 'solve' in globals() and callable(globals()['solve']):
-        _solve_fn = globals()['solve']
+    if '{target_func}' in globals() and callable(globals()['{target_func}']):
+        _fn = globals()['{target_func}']
         _raw_input = sys.stdin.read().strip()
         
         _parsed_args = []
         if _raw_input:
             _lines = [line.strip() for line in _raw_input.splitlines() if line.strip()]
             for _line in _lines:
+                _m = re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.+)$', _line)
+                if _m and not _line.startswith(('{{', '[', '(')):
+                    _line = _m.group(1).strip()
                 try:
                     _val = ast.literal_eval(_line)
                     if isinstance(_val, tuple):
@@ -280,7 +534,7 @@ if __name__ == '__main__':
                         _parsed_args.append(_val)
                 except Exception:
                     try:
-                        _val = ast.literal_eval(f"({_line})")
+                        _val = ast.literal_eval(f"({{_line}})")
                         if isinstance(_val, tuple):
                             _parsed_args.extend(list(_val))
                         else:
@@ -294,41 +548,44 @@ if __name__ == '__main__':
                                     _converted.append(ast.literal_eval(_p))
                                 except Exception:
                                     _converted.append(_p)
-                            _parsed_args.extend(_converted)
+                            if len(_lines) > 1:
+                                _parsed_args.append(_converted)
+                            else:
+                                _parsed_args.extend(_converted)
                         else:
                             _parsed_args.append(_line)
         
         try:
-            _sig = inspect.signature(_solve_fn)
+            _sig = inspect.signature(_fn)
             _params = list(_sig.parameters.values())
             _param_count = len(_params)
             _has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in _params)
             
             if _has_varargs:
-                _res = _solve_fn(*_parsed_args)
+                _res = _fn(*_parsed_args)
             elif _param_count == 0:
-                _res = _solve_fn()
+                _res = _fn()
             elif _param_count == 1:
                 if len(_parsed_args) == 1:
-                    _res = _solve_fn(_parsed_args[0])
+                    _res = _fn(_parsed_args[0])
                 else:
                     try:
-                        _res = _solve_fn(_parsed_args[0])
+                        _res = _fn(_parsed_args[0])
                     except Exception:
                         try:
-                            _res = _solve_fn(*_parsed_args)
+                            _res = _fn(*_parsed_args)
                         except Exception:
-                            _res = _solve_fn(_parsed_args)
+                            _res = _fn(_parsed_args)
             else:
                 if len(_parsed_args) == _param_count:
-                    _res = _solve_fn(*_parsed_args)
+                    _res = _fn(*_parsed_args)
                 elif len(_parsed_args) > _param_count:
-                    _res = _solve_fn(*_parsed_args[:_param_count])
+                    _res = _fn(*_parsed_args[:_param_count])
                 elif len(_parsed_args) == 1 and isinstance(_parsed_args[0], (list, tuple)) and len(_parsed_args[0]) == _param_count:
-                    _res = _solve_fn(*_parsed_args[0])
+                    _res = _fn(*_parsed_args[0])
                 else:
                     _args_to_pass = _parsed_args + [None] * (_param_count - len(_parsed_args))
-                    _res = _solve_fn(*_args_to_pass)
+                    _res = _fn(*_args_to_pass)
             
             if _res is not None:
                 if isinstance(_res, bool):
@@ -343,24 +600,21 @@ if __name__ == '__main__':
         except Exception as _e:
             raise _e
 """
-    return code + wrapper
+    return _inject_builtins_patch(code + wrapper)
 
 
 async def _run_local_python(code: str, stdin: str) -> Dict[str, Optional[str]]:
-    """Execute Python code locally as a fallback when Piston is unavailable."""
-    code = _prepare_python_code(code)
+    """Execute Python code locally as a fallback when Piston is unavailable.
+    NOTE: code has already been prepared by _prepare_python_code and patched
+    by _inject_builtins_patch in execute_code before reaching here.
+    Do NOT call _prepare_python_code again here — it would double-process the code."""
     provided = stdin or ""
-    count_inputs = code.count("input(")
-    if count_inputs > 1 and "\n" not in provided and provided.strip() and " " in provided:
-        provided = "\n".join(provided.split())
-    if not provided.endswith("\n"):
-        provided += "\n"
     tmpname = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
             f.write(code)
             tmpname = f.name
-        proc = subprocess.run([sys.executable, tmpname], input=provided.encode(), capture_output=True, timeout=8)
+        proc = subprocess.run([sys.executable, tmpname], input=provided.encode("utf-8"), capture_output=True, timeout=8)
         out = proc.stdout.decode(errors="replace")
         err = proc.stderr.decode(errors="replace")
         error = None

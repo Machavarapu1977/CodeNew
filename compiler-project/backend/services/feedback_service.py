@@ -155,3 +155,31 @@ def generate_feedback_and_reviews(
         "feedback": feedback_msg,
         "review_points": review_points
     }
+
+
+def generate_test_submission_note(
+    test_title: str,
+    student_name: str = "Student",
+    total_questions: int = 0,
+    solved_count: int = 0,
+    score: int = 0,
+    total_marks: int = 100
+) -> str:
+    """Generate a confirmation note and summary feedback for the student when a test is submitted."""
+    name = student_name or "Student"
+    title = test_title or "Assessment"
+
+    if solved_count == total_questions and total_questions > 0:
+        performance_status = "Outstanding performance! You successfully solved all questions."
+    elif solved_count > 0:
+        performance_status = f"Good effort! You solved {solved_count} of {total_questions} questions."
+    else:
+        performance_status = "Your test has been recorded. Review the problem solutions to strengthen your understanding."
+
+    note = (
+        f"Note: Dear {name}, your test '{title}' has been successfully submitted and finalized! "
+        f"{performance_status} Total Score: {score}/{total_marks}. "
+        f"Your results have been securely recorded. Returning you to the main dashboard."
+    )
+    return note
+

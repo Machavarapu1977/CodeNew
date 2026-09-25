@@ -271,22 +271,31 @@ def read_question(question_id: int, db: Session = Depends(get_db)):
 @app.post("/run")
 async def run_code(req: RunRequest, db: Session = Depends(get_db)):
     """Execute code via the piston_service and return stdout/stderr and check correctness."""
-    stdin = req.input if req.input is not None else ""
     q_id = req.question_id if req.question_id is not None else req.questionId
     
     sample_output = ""
     is_custom_input = False
+    stdin = ""
+
     if q_id is not None:
         q = db.query(Question).filter(Question.id == q_id).first()
         if q:
-            if req.input is None and q.sample_input:
-                stdin = q.sample_input
+            sample_in = (q.sample_input or "").strip()
             if q.sample_output:
                 sample_output = q.sample_output
-            sample_in = (q.sample_input or "").strip()
-            curr_in = stdin.strip()
-            if sample_in and curr_in != sample_in:
-                is_custom_input = True
+            
+            # If user provided explicit non-empty input
+            if req.input is not None and req.input.strip():
+                stdin = req.input
+                if sample_in and stdin.strip() != sample_in:
+                    is_custom_input = True
+            else:
+                stdin = q.sample_input or ""
+                is_custom_input = False
+    else:
+        stdin = req.input if req.input is not None else ""
+        if stdin.strip():
+            is_custom_input = True
 
     # Execute code with dynamic input via Piston or local fallback
     result = await execute_code(req.language, req.code, stdin)
@@ -338,16 +347,16 @@ async def submit_code(question_id: int, req: SubmissionRequest, db: Session = De
     if q.sample_input and q.sample_output:
         test_cases_to_run.append({
             "id": 1,
-            "input": q.sample_input,
-            "expected": q.sample_output,
+            "input": q.sample_input or "",
+            "expected": q.sample_output or "",
             "is_hidden": False
         })
     idx = len(test_cases_to_run) + 1
     for tc in db_test_cases:
         test_cases_to_run.append({
             "id": idx,
-            "input": tc.input_data,
-            "expected": tc.expected_output,
+            "input": tc.input_data or "",
+            "expected": tc.expected_output or "",
             "is_hidden": tc.is_hidden
         })
         idx += 1
@@ -359,7 +368,9 @@ async def submit_code(question_id: int, req: SubmissionRequest, db: Session = De
 
     # Execute each test case using Piston
     for tc in test_cases_to_run:
-        run_res = await execute_code(runtime_language, req.source_code, tc["input"])
+        tc_in = tc["input"] if tc["input"] is not None else ""
+        tc_exp = tc["expected"] if tc["expected"] is not None else ""
+        run_res = await execute_code(runtime_language, req.source_code, tc_in)
         actual_output = run_res.get("output", "")
         error_msg = run_res.get("error", None)
         if error_msg:
@@ -367,7 +378,7 @@ async def submit_code(question_id: int, req: SubmissionRequest, db: Session = De
             passed = False
             actual_display = error_msg
         else:
-            eval_res = evaluate_output(actual_output, tc["expected"])
+            eval_res = evaluate_output(actual_output, tc_exp)
             tc_status = eval_res["status"]
             passed = eval_res["passed"]
             actual_display = actual_output
@@ -665,6 +676,66 @@ def _test_to_response(test: Test) -> dict:
             for q in test.questions
         ],
     }
+
+
+from pydantic import BaseModel
+
+class TestFinishRequest(BaseModel):
+    test_id: int | None = None
+    student_name: str | None = "Student"
+    solved_questions: list[int] = []
+    question_submissions: dict = {}
+    time_taken_seconds: int = 0
+
+@app.post("/tests/{test_id}/finish")
+@app.post("/tests/finish")
+async def finish_test(test_id: int | None = None, req: TestFinishRequest | None = None, db: Session = Depends(get_db)):
+    """Automatically submit test, generate student confirmation note via feedback_service,
+    and return instruction to navigate back to the main dashboard."""
+    from services.feedback_service import generate_test_submission_note
+
+    target_test_id = test_id or (req.test_id if req else None)
+    test_title = "Assessment"
+    total_marks = 100
+    total_questions = 0
+
+    if target_test_id:
+        test = db.query(Test).filter(Test.id == target_test_id).first()
+        if test:
+            test_title = test.title or "Assessment"
+            total_marks = test.total_marks or 100
+            total_questions = len(test.questions)
+
+    student_name = (req.student_name if req and req.student_name else "Student")
+    solved_count = len(req.solved_questions) if req and req.solved_questions else 0
+    if total_questions == 0 and req and req.question_submissions:
+        total_questions = max(len(req.question_submissions), solved_count)
+    if total_questions == 0:
+        total_questions = max(1, solved_count)
+
+    score = int((solved_count / total_questions) * total_marks) if total_questions > 0 else 0
+
+    note = generate_test_submission_note(
+        test_title=test_title,
+        student_name=student_name,
+        total_questions=total_questions,
+        solved_count=solved_count,
+        score=score,
+        total_marks=total_marks
+    )
+
+    return {
+        "status": "Submitted",
+        "message": "Test has been automatically submitted successfully.",
+        "note": note,
+        "test_title": test_title,
+        "solved_count": solved_count,
+        "total_questions": total_questions,
+        "score": score,
+        "total_marks": total_marks,
+        "redirect_to": "dashboard"
+    }
+
 
 
 # ── AI / GROQ QUESTION GENERATION ENDPOINT ─────────────────────────────────
