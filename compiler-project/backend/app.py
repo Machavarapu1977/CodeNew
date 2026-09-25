@@ -839,102 +839,44 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-@app.post("/ai/generate-questions")
-async def ai_generate_questions(req: AIGenerateRequest):
-    """
-    Generate an exact sequence of coding questions using Groq API or smart synthesizer fallback.
-    Takes topic, difficulty, and count as input.
-    """
-    topic = req.topic.strip() or "Arrays"
-    difficulty = req.difficulty.strip() or "Medium"
-    count = max(1, min(req.count, 10))
-    groq_key = (req.api_key or os.getenv("GROQ_API_KEY") or "").strip()
-
-    prompt = (
-        f"You are a computer science professor and problem setter. Generate exactly {count} distinct competitive programming questions for Topic: \"{topic}\" at Difficulty: \"{difficulty}\".\n"
-        f"{'Additional nuance: ' + req.custom_prompt if req.custom_prompt else ''}\n"
-        f"Return ONLY a valid JSON array of {count} question objects without any markdown wrapper or explanation.\n"
-        f"Each question object must contain keys: 'title', 'topic', 'difficulty', 'description', 'constraints', 'sample_input', 'sample_output', 'starter_code'."
-    )
-
-    if groq_key:
-        candidate_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound"]
+@app.get("/rag/status")
+def get_rag_status():
+    """Diagnostic endpoint checking Pinecone and RAG system status."""
+    from services.pinecone_service import get_pinecone_index, PINECONE_INDEX_NAME
+    idx = get_pinecone_index()
+    vector_count = 0
+    connected = False
+    if idx is not None:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                for model_name in candidate_models:
-                    try:
-                        res = await client.post(
-                            "https://api.groq.com/openai/v1/chat/completions",
-                            headers={
-                                "Authorization": f"Bearer {groq_key}",
-                                "Content-Type": "application/json"
-                            },
-                            json={
-                                "model": model_name,
-                                "messages": [
-                                    {"role": "system", "content": "You are an expert competitive programming problem setter that outputs strictly valid JSON arrays."},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                "temperature": 0.6
-                            }
-                        )
-                        if res.status_code == 200:
-                            data = res.json()
-                            content = data["choices"][0]["message"]["content"]
-                            cleaned = re.sub(r"^```(?:json)?", "", content.strip(), flags=re.MULTILINE)
-                            cleaned = re.sub(r"```$", "", cleaned.strip(), flags=re.MULTILINE).strip()
-                            
-                            try:
-                                parsed = json.loads(cleaned)
-                            except json.JSONDecodeError:
-                                # Fallback: search for JSON array within text
-                                match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
-                                if match:
-                                    parsed = json.loads(match.group(0))
-                                else:
-                                    raise
+            stats = idx.describe_index_stats()
+            vector_count = getattr(stats, "total_vector_count", 0)
+            connected = True
+        except Exception:
+            connected = False
 
-                            items = parsed if isinstance(parsed, list) else (parsed.get("questions") or parsed.get("data") or [])
-                            
-                            if items:
-                                formatted = []
-                                for idx, q in enumerate(items[:count]):
-                                    formatted.append({
-                                        "id": f"groq-q-{idx+1}",
-                                        "sequence_number": idx + 1,
-                                        "title": q.get("title") or f"{topic} Problem {idx+1}",
-                                        "topic": q.get("topic") or topic,
-                                        "difficulty": q.get("difficulty") or (difficulty if difficulty != "All" else "Medium"),
-                                        "description": q.get("description") or f"Solve {topic} problem.",
-                                        "constraints": q.get("constraints") or "1 <= N <= 10^5\nTime Limit: 1.0s\nMemory Limit: 256MB",
-                                        "sample_input": str(q.get("sample_input") or "1 2 3"),
-                                        "sample_output": str(q.get("sample_output") or "6"),
-                                        "starter_code": q.get("starter_code") or "def solve():\n    pass\n"
-                                    })
-                                return {
-                                    "success": True,
-                                    "source": f"groq-api ({model_name})",
-                                    "topic": topic,
-                                    "difficulty": difficulty,
-                                    "count": len(formatted),
-                                    "questions": formatted
-                                }
-                        else:
-                            logger.warning(f"Groq API returned status {res.status_code} for model {model_name}: {res.text}")
-                    except Exception as loop_e:
-                        logger.warning(f"Groq generation error with model {model_name}: {loop_e}")
-                        continue
-        except Exception as e:
-            logger.error(f"Groq API client encountered exception: {e}", exc_info=True)
-
-    # Fallback synthesizer
-    fallback_qs = generate_fallback_questions(topic, difficulty, count)
     return {
-        "success": True,
-        "source": "groq-synthesizer",
-        "topic": topic,
-        "difficulty": difficulty,
-        "count": len(fallback_qs),
-        "questions": fallback_qs
+        "rag_system_enabled": True,
+        "retrieval_backend": "Pinecone Vector Database",
+        "generation_backend": "Groq LLM (qwen/qwen3.8-27b)",
+        "index_name": PINECONE_INDEX_NAME,
+        "pinecone_connected": connected,
+        "total_vector_count": vector_count,
+        "rag_pipeline": "1. Pinecone Vector Retrieval -> 2. Context Grounding & Augmentation -> 3. Groq LLM Synthesis"
     }
+
+@app.post("/ai/generate-questions")
+async def ai_generate_questions(req: AIGenerateRequest, db: Session = Depends(get_db)):
+    """
+    Generate coding questions using Pinecone RAG system (Retrieval-Augmented Generation)
+    grounded in question bank context, powered by Groq LLM.
+    """
+    from services.rag_service import generate_questions_with_rag
+    return await generate_questions_with_rag(
+        topic=req.topic,
+        difficulty=req.difficulty,
+        count=req.count,
+        custom_prompt=req.custom_prompt,
+        api_key=req.api_key,
+        db_session=db
+    )
 

@@ -129,6 +129,7 @@ class AIGenerateRequest(BaseModel):
     count: int = 3
     custom_prompt: str | None = None
     api_key: str | None = None
+    use_rag: bool = True
 
 
 # ── Pinecone Vector Search Schemas ──────────────────────────────────────────
@@ -137,6 +138,7 @@ class VectorSearchRequest(BaseModel):
     top_k: int = 5
     topic: str | None = None
     difficulty: str | None = None
+    use_rag: bool = False
 
 class PineconeSyncResponse(BaseModel):
     total: int
