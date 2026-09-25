@@ -161,6 +161,19 @@ try:
         db.commit()
         db.refresh(q1)
 
+    # Ensure standard questions have constraints populated if missing
+    default_constraints_map = {
+        1: "-10^9 <= a, b <= 10^9\nTime Limit: 1.0s\nMemory Limit: 256MB",
+        2: "1 <= arr.length <= 10^5\n-10^9 <= arr[i], target <= 10^9\nArray is sorted in ascending order\nTime Limit: 0.5s",
+        3: "1 <= nums.length <= 10^4\n0 <= nums[i] <= 10^5\nTime Limit: 1.0s\nMemory Limit: 256MB",
+        12: "1 <= nums.length <= 10^5\n-10^9 <= nums[i] <= 10^9\nTime Limit: 1.0s\nMemory Limit: 256MB"
+    }
+    for q_id, q_constraints in default_constraints_map.items():
+        q_obj = db.query(Question).filter(Question.id == q_id).first()
+        if q_obj and not q_obj.constraints:
+            q_obj.constraints = q_constraints
+    db.commit()
+
     tc_count = db.query(TestCase).filter(TestCase.question_id == 1).count()
     if tc_count == 0:
         test_cases = [
@@ -503,7 +516,11 @@ def vector_search_questions(req: VectorSearchRequest, db: Session = Depends(get_
                 "title": q.title,
                 "topic": q.topic or "General",
                 "difficulty": q.difficulty or "Medium",
-                "description": q.description,
+                "description": q.description or "",
+                "constraints": q.constraints or "",
+                "sample_input": q.sample_input or "",
+                "sample_output": q.sample_output or "",
+                "starter_code": q.starter_code or "",
                 "score": 1.0
             }
             for q in db_matches
@@ -672,6 +689,11 @@ def _test_to_response(test: Test) -> dict:
                 "title": q.title,
                 "difficulty": q.difficulty or "Medium",
                 "topic": q.topic or "General",
+                "description": q.description or "",
+                "constraints": q.constraints or "",
+                "sample_input": q.sample_input or "",
+                "sample_output": q.sample_output or "",
+                "starter_code": q.starter_code or "",
             }
             for q in test.questions
         ],

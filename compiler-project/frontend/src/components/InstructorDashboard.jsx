@@ -392,6 +392,20 @@ export default function InstructorDashboard({ user, onLogout }) {
     setSelectedQuestion(null);
   };
 
+  const handleSelectQuestion = (q) => {
+    setSelectedQuestion(q);
+    if (q && q.id) {
+      fetch(`${API_BASE}/questions/${q.id}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.constraints) {
+            setSelectedQuestion(prev => (prev && prev.id === data.id ? { ...prev, ...data } : prev));
+          }
+        })
+        .catch(err => console.warn('Could not refresh question details:', err));
+    }
+  };
+
   const handleOpenTemplateModal = (tmpl) => {
     setSelectedTemplate(tmpl);
     setFormTitle(`${tmpl.name} Problem`);
@@ -564,7 +578,7 @@ export default function InstructorDashboard({ user, onLogout }) {
                       <li
                         className="id-q-row"
                         key={q.id || i}
-                        onClick={() => setSelectedQuestion(q)}
+                        onClick={() => handleSelectQuestion(q)}
                       >
                         <span className="id-q-doc-icon">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -579,6 +593,25 @@ export default function InstructorDashboard({ user, onLogout }) {
                               {q.difficulty || 'Medium'}
                             </span>
                             <span className="id-topic-tag">• {q.topic || 'General'}</span>
+                            {q.constraints ? (
+                              <span
+                                style={{
+                                  fontSize: '0.73rem',
+                                  background: '#f0fdf4',
+                                  color: '#15803d',
+                                  padding: '0.12rem 0.45rem',
+                                  borderRadius: '4px',
+                                  border: '1px solid #bbf7d0',
+                                  fontWeight: 600,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '2px'
+                                }}
+                                title={q.constraints}
+                              >
+                                ⚡ Constraints
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                         <button className="id-view-q-btn">View Question →</button>

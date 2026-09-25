@@ -251,6 +251,7 @@ function App() {
     number: 1,
     title: '',
     description: '',
+    constraints: '',
     inputFormat: '',
     outputFormat: '',
     sampleInput: '',
@@ -317,6 +318,7 @@ function App() {
         number: displayNum,
         title: targetQ.title ?? '',
         description: targetQ.description ?? '',
+        constraints: targetQ.constraints ?? '',
         inputFormat: targetQ.inputFormat ?? targetQ.input_format ?? '',
         outputFormat: targetQ.outputFormat ?? targetQ.output_format ?? '',
         sampleInput: sampleIn,
@@ -337,6 +339,7 @@ function App() {
           number: displayNum,
           title: data.title ?? targetQ?.title ?? '',
           description: data.description ?? targetQ?.description ?? '',
+          constraints: data.constraints ?? targetQ?.constraints ?? '',
           inputFormat: data.input_format ?? data.inputFormat ?? targetQ?.inputFormat ?? '',
           outputFormat: data.output_format ?? data.outputFormat ?? targetQ?.outputFormat ?? '',
           sampleInput: sampleIn,
@@ -991,6 +994,22 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              {question.constraints && (
+                <div className="constraints-section">
+                  <h4>Constraints:</h4>
+                  <ul className="constraints-list">
+                    {question.constraints.split('\n').filter(line => line.trim().length > 0).map((line, idx) => {
+                      const cleanLine = line.trim().replace(/^[•\-\*]\s*/, '');
+                      return (
+                        <li key={idx}>
+                          <code>{cleanLine}</code>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
 
@@ -1170,159 +1189,279 @@ function App() {
           </section>
         </main>
 
-        {/* ── Auto-Generate Mock Test Modal ── */}
+        {/* ── Auto-Generate / Switch Mock Test Modal ── */}
         {isStudentTestModalOpen && (
           <div className="id-modal-overlay" onClick={() => setIsStudentTestModalOpen(false)}>
             <div className="id-modal-card id-modal-card--wide" onClick={(e) => e.stopPropagation()}>
               <div className="id-modal-header">
                 <div className="id-modal-title-group">
-                  <div className="id-tmpl-icon">⚡</div>
+                  <div className="id-tmpl-icon">📋</div>
                   <div>
-                    <h3 className="id-modal-heading">Auto-Generate Mock Test</h3>
-                    <p className="id-modal-subheading">Questions are automatically selected from the Question Bank using a balanced difficulty strategy.</p>
+                    <h3 className="id-modal-heading">Mock Assessments &amp; Question Bank</h3>
+                    <p className="id-modal-subheading">Generate a new test or switch to an existing assessment.</p>
                   </div>
                 </div>
                 <button className="id-modal-close" onClick={() => setIsStudentTestModalOpen(false)}>✕</button>
               </div>
 
-              <form onSubmit={handleAutoGenerateTest} className="id-modal-form">
-                {/* Row 1: Title + Duration + Marks */}
-                <div className="id-form-row">
-                  <div className="id-form-group flex-2">
-                    <label className="id-form-label">Test Title</label>
-                    <input
-                      className="id-form-input"
-                      type="text"
-                      value={newTestTitle}
-                      onChange={(e) => setNewTestTitle(e.target.value)}
-                      placeholder={`e.g. Mock Test – ${new Date().toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}`}
-                    />
-                  </div>
-                  <div className="id-form-group">
-                    <label className="id-form-label">Duration (min)</label>
-                    <input
-                      className="id-form-input"
-                      type="number"
-                      min="5"
-                      max="180"
-                      value={newTestDuration}
-                      onChange={(e) => setNewTestDuration(e.target.value)}
-                    />
-                  </div>
-                  <div className="id-form-group">
-                    <label className="id-form-label">Total Marks</label>
-                    <input
-                      className="id-form-input"
-                      type="number"
-                      min="10"
-                      value={newTestMarks}
-                      onChange={(e) => setNewTestMarks(e.target.value)}
-                    />
-                  </div>
-                </div>
+              {/* Tab Selector */}
+              <div style={{ display: 'flex', gap: '0.6rem', padding: '0.75rem 1.5rem', background: '#09152b', borderBottom: '1px solid #1e293b' }}>
+                <button
+                  type="button"
+                  style={{
+                    padding: '0.45rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: studentTestTab === 'create' ? '#3b82f6' : '#334155',
+                    background: studentTestTab === 'create' ? '#2563eb' : 'transparent',
+                    color: studentTestTab === 'create' ? '#ffffff' : '#94a3b8',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                  onClick={() => setStudentTestTab('create')}
+                >
+                  ⚡ Auto-Generate New Test
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: '0.45rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: studentTestTab === 'select' ? '#3b82f6' : '#334155',
+                    background: studentTestTab === 'select' ? '#2563eb' : 'transparent',
+                    color: studentTestTab === 'select' ? '#ffffff' : '#94a3b8',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                  onClick={() => setStudentTestTab('select')}
+                >
+                  📚 Switch Existing Test ({testsList.length})
+                </button>
+              </div>
 
-                {/* Row 2: Questions + Topic + Difficulty */}
-                <div className="id-form-row">
-                  <div className="id-form-group">
-                    <label className="id-form-label">No. of Questions (1–20)</label>
-                    <input
-                      className="id-form-input"
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={autoGenNumQuestions}
-                      onChange={(e) => setAutoGenNumQuestions(Math.min(20, Math.max(1, Number(e.target.value))))}
-                    />
-                  </div>
-                  <div className="id-form-group flex-2">
-                    <label className="id-form-label">Topic</label>
-                    <select
-                      className="id-form-select"
-                      value={autoGenTopic}
-                      onChange={(e) => setAutoGenTopic(e.target.value)}
-                    >
-                      <option value="All">All Topics</option>
-                      <option value="Arrays">Arrays</option>
-                      <option value="Dynamic Programming">Dynamic Programming</option>
-                      <option value="Graphs">Graphs</option>
-                      <option value="Trees">Trees</option>
-                      <option value="Strings">Strings</option>
-                      <option value="Linked Lists">Linked Lists</option>
-                      <option value="Searching">Searching</option>
-                      <option value="Recursion">Recursion</option>
-                      <option value="General">General</option>
-                    </select>
-                  </div>
-                  <div className="id-form-group flex-2">
-                    <label className="id-form-label">Difficulty</label>
-                    <select
-                      className="id-form-select"
-                      value={autoGenDifficulty}
-                      onChange={(e) => setAutoGenDifficulty(e.target.value)}
-                    >
-                      <option value="All">Balanced (All)</option>
-                      <option value="Easy">Easy Only</option>
-                      <option value="Medium">Medium Only</option>
-                      <option value="Hard">Hard Only</option>
-                    </select>
-                  </div>
+              {studentTestTab === 'select' ? (
+                <div style={{ padding: '1.25rem 1.5rem', maxHeight: '55vh', overflowY: 'auto' }}>
+                  {testsList.length === 0 ? (
+                    <p style={{ color: '#94a3b8', textAlign: 'center', margin: '2rem 0' }}>No tests available.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                      {testsList.map(t => {
+                        const isCurrent = selectedTest?.id === t.id;
+                        return (
+                          <div
+                            key={t.id}
+                            style={{
+                              background: isCurrent ? '#1e293b' : '#0f172a',
+                              border: isCurrent ? '1.5px solid #3b82f6' : '1px solid #1e293b',
+                              borderRadius: '8px',
+                              padding: '1rem 1.25rem',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '1rem'
+                            }}
+                          >
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                                <strong style={{ color: '#f8fafc', fontSize: '1rem' }}>{t.title}</strong>
+                                {isCurrent && (
+                                  <span style={{ background: '#1d4ed8', color: '#fff', fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '999px', fontWeight: 600 }}>Active</span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '0.8rem', color: '#94a3b8', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                <span>⏱ {t.duration_minutes || 45} mins</span>
+                                <span>📊 {t.total_marks || 100} marks</span>
+                                <span>📝 {t.questions?.length || 0} questions</span>
+                              </div>
+                              {t.questions && t.questions.length > 0 && (
+                                <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                                  {t.questions.map((q, idx) => (
+                                    <span
+                                      key={q.id || idx}
+                                      style={{
+                                        background: '#334155',
+                                        color: '#cbd5e1',
+                                        fontSize: '0.72rem',
+                                        padding: '0.15rem 0.45rem',
+                                        borderRadius: '4px',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem'
+                                      }}
+                                    >
+                                      {q.title}
+                                      {q.constraints && <span title="Constraints defined" style={{ color: '#fbbf24' }}>⚡</span>}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              className="id-view-q-btn"
+                              style={{
+                                background: isCurrent ? '#334155' : '#2563eb',
+                                color: '#ffffff',
+                                borderColor: isCurrent ? '#475569' : '#1d4ed8',
+                                whiteSpace: 'nowrap'
+                              }}
+                              disabled={isCurrent}
+                              onClick={() => {
+                                handleTestSelect(t);
+                                setIsStudentTestModalOpen(false);
+                              }}
+                            >
+                              {isCurrent ? 'Current Test' : 'Switch & Start →'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-
-                {/* Strategy info callout */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2445 100%)',
-                  border: '1px solid #2563eb40',
-                  borderRadius: '10px',
-                  padding: '0.85rem 1.1rem',
-                  marginBottom: '0.5rem',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '0.7rem'
-                }}>
-                  <span style={{ fontSize: '1.2rem', marginTop: '1px' }}>⚖️</span>
-                  <div>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#93c5fd', marginBottom: '2px' }}>Balanced Selection Strategy</div>
-                    <div style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
-                      {autoGenDifficulty === 'All'
-                        ? `Questions will be auto-picked as ~25% Easy, ~50% Medium, ~25% Hard from ${autoGenTopic === 'All' ? 'all topics' : autoGenTopic}. Order is randomised each time.`
-                        : `All ${autoGenNumQuestions} question${autoGenNumQuestions !== 1 ? 's' : ''} will be picked randomly from ${autoGenDifficulty} difficulty${autoGenTopic !== 'All' ? ` in ${autoGenTopic}` : ''}.`
-                      }
+              ) : (
+                <form onSubmit={handleAutoGenerateTest} className="id-modal-form">
+                  {/* Row 1: Title + Duration + Marks */}
+                  <div className="id-form-row">
+                    <div className="id-form-group flex-2">
+                      <label className="id-form-label">Test Title</label>
+                      <input
+                        className="id-form-input"
+                        type="text"
+                        value={newTestTitle}
+                        onChange={(e) => setNewTestTitle(e.target.value)}
+                        placeholder={`e.g. Mock Test – ${new Date().toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}`}
+                      />
+                    </div>
+                    <div className="id-form-group">
+                      <label className="id-form-label">Duration (min)</label>
+                      <input
+                        className="id-form-input"
+                        type="number"
+                        min="5"
+                        max="180"
+                        value={newTestDuration}
+                        onChange={(e) => setNewTestDuration(e.target.value)}
+                      />
+                    </div>
+                    <div className="id-form-group">
+                      <label className="id-form-label">Total Marks</label>
+                      <input
+                        className="id-form-input"
+                        type="number"
+                        min="10"
+                        value={newTestMarks}
+                        onChange={(e) => setNewTestMarks(e.target.value)}
+                      />
                     </div>
                   </div>
-                </div>
 
-                {/* Error message */}
-                {autoGenError && (
-                  <div style={{
-                    background: '#3b0a0a',
-                    border: '1px solid #dc2626',
-                    borderRadius: '8px',
-                    padding: '0.7rem 1rem',
-                    color: '#fca5a5',
-                    fontSize: '0.83rem',
-                    marginBottom: '0.25rem'
-                  }}>
-                    ⚠️ {autoGenError}
+                  {/* Row 2: Questions + Topic + Difficulty */}
+                  <div className="id-form-row">
+                    <div className="id-form-group">
+                      <label className="id-form-label">No. of Questions (1–20)</label>
+                      <input
+                        className="id-form-input"
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={autoGenNumQuestions}
+                        onChange={(e) => setAutoGenNumQuestions(Math.min(20, Math.max(1, Number(e.target.value))))}
+                      />
+                    </div>
+                    <div className="id-form-group flex-2">
+                      <label className="id-form-label">Topic</label>
+                      <select
+                        className="id-form-select"
+                        value={autoGenTopic}
+                        onChange={(e) => setAutoGenTopic(e.target.value)}
+                      >
+                        <option value="All">All Topics</option>
+                        <option value="Arrays">Arrays</option>
+                        <option value="Dynamic Programming">Dynamic Programming</option>
+                        <option value="Graphs">Graphs</option>
+                        <option value="Trees">Trees</option>
+                        <option value="Strings">Strings</option>
+                        <option value="Linked Lists">Linked Lists</option>
+                        <option value="Searching">Searching</option>
+                        <option value="Recursion">Recursion</option>
+                        <option value="General">General</option>
+                      </select>
+                    </div>
+                    <div className="id-form-group flex-2">
+                      <label className="id-form-label">Difficulty</label>
+                      <select
+                        className="id-form-select"
+                        value={autoGenDifficulty}
+                        onChange={(e) => setAutoGenDifficulty(e.target.value)}
+                      >
+                        <option value="All">Balanced (All)</option>
+                        <option value="Easy">Easy Only</option>
+                        <option value="Medium">Medium Only</option>
+                        <option value="Hard">Hard Only</option>
+                      </select>
+                    </div>
                   </div>
-                )}
 
-                <div className="id-modal-footer">
-                  <button type="button" className="id-modal-cancel-btn" onClick={() => setIsStudentTestModalOpen(false)}>
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="id-modal-submit-btn"
-                    disabled={isCreatingTest}
-                    style={isCreatingTest ? { opacity: 0.7, cursor: 'not-allowed' } : {}}
-                  >
-                    {isCreatingTest
-                      ? '⚡ Generating...'
-                      : `⚡ Generate & Start (${autoGenNumQuestions} Q${autoGenNumQuestions !== 1 ? 's' : ''})`
-                    }
-                  </button>
-                </div>
-              </form>
+                  {/* Strategy info callout */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2445 100%)',
+                    border: '1px solid #2563eb40',
+                    borderRadius: '10px',
+                    padding: '0.85rem 1.1rem',
+                    marginBottom: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.7rem'
+                  }}>
+                    <span style={{ fontSize: '1.2rem', marginTop: '1px' }}>⚖️</span>
+                    <div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#93c5fd', marginBottom: '2px' }}>Balanced Selection Strategy</div>
+                      <div style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
+                        {autoGenDifficulty === 'All'
+                          ? `Questions will be auto-picked as ~25% Easy, ~50% Medium, ~25% Hard from ${autoGenTopic === 'All' ? 'all topics' : autoGenTopic}. Order is randomised each time.`
+                          : `All ${autoGenNumQuestions} question${autoGenNumQuestions !== 1 ? 's' : ''} will be picked randomly from ${autoGenDifficulty} difficulty${autoGenTopic !== 'All' ? ` in ${autoGenTopic}` : ''}.`
+                        }
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Error message */}
+                  {autoGenError && (
+                    <div style={{
+                      background: '#3b0a0a',
+                      border: '1px solid #dc2626',
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      color: '#fca5a5',
+                      fontSize: '0.83rem',
+                      marginBottom: '0.25rem'
+                    }}>
+                      ⚠️ {autoGenError}
+                    </div>
+                  )}
+
+                  <div className="id-modal-footer">
+                    <button type="button" className="id-modal-cancel-btn" onClick={() => setIsStudentTestModalOpen(false)}>
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="id-modal-submit-btn"
+                      disabled={isCreatingTest}
+                      style={isCreatingTest ? { opacity: 0.7, cursor: 'not-allowed' } : {}}
+                    >
+                      {isCreatingTest
+                        ? '⚡ Generating...'
+                        : `⚡ Generate & Start (${autoGenNumQuestions} Q${autoGenNumQuestions !== 1 ? 's' : ''})`
+                      }
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}

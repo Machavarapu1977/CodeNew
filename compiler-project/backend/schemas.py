@@ -99,6 +99,11 @@ class QuestionSummary(BaseModel):
     title: str
     difficulty: str = "Medium"
     topic: str = "General"
+    description: str | None = None
+    constraints: str | None = None
+    sample_input: str | None = None
+    sample_output: str | None = None
+    starter_code: str | None = None
 
     class Config:
         from_attributes = True

@@ -177,6 +177,9 @@ def search_questions_in_pinecone(query_text: str, top_k: int = 5, topic: Optiona
                     "topic": meta.get("topic", "General"),
                     "difficulty": meta.get("difficulty", "Medium"),
                     "description": meta.get("description", ""),
+                    "constraints": meta.get("constraints", ""),
+                    "sample_input": meta.get("sample_input", ""),
+                    "sample_output": meta.get("sample_output", ""),
                     "score": round(m.get("score", 0.0), 4)
                 })
             return matches
