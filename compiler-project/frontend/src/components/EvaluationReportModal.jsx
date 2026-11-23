@@ -35,6 +35,8 @@ export default function EvaluationReportModal({
   timeTakenSeconds = 0,
   totalDurationMinutes = 45,
   studentName = 'Student',
+  integrityReport = null,
+  violations = [],
   onRetakeOrNewTest
 }) {
   if (!isOpen) return null;
@@ -444,6 +446,95 @@ export default function EvaluationReportModal({
               ))}
             </div>
           </div>
+
+          {/* Section: Integrity Report */}
+          {integrityReport && (
+            <div className="eval-section">
+              <div className="eval-section-header">
+                <h3>🛡️ Academic Integrity Report</h3>
+                <p>Proctoring analysis — recorded during your exam session</p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                {/* Integrity Score Card */}
+                <div style={{
+                  flex: '0 0 auto',
+                  background: `rgba(${integrityReport.badge_color === 'green' ? '34,197,94' : integrityReport.badge_color === 'yellow' ? '234,179,8' : integrityReport.badge_color === 'orange' ? '249,115,22' : '239,68,68'}, 0.12)`,
+                  border: `1.5px solid rgba(${integrityReport.badge_color === 'green' ? '34,197,94' : integrityReport.badge_color === 'yellow' ? '234,179,8' : integrityReport.badge_color === 'orange' ? '249,115,22' : '239,68,68'}, 0.4)`,
+                  borderRadius: '10px',
+                  padding: '18px 28px',
+                  textAlign: 'center',
+                  minWidth: '140px'
+                }}>
+                  <div style={{ fontSize: '2.4rem', fontWeight: '800', color: integrityReport.badge_color === 'green' ? '#16a34a' : integrityReport.badge_color === 'yellow' ? '#ca8a04' : integrityReport.badge_color === 'orange' ? '#ea580c' : '#dc2626' }}>
+                    {integrityReport.score}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', fontWeight: '600', letterSpacing: '0.08em', color: '#94a3b8', marginTop: '4px' }}>INTEGRITY SCORE</div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: '700', marginTop: '6px', color: integrityReport.badge_color === 'green' ? '#16a34a' : integrityReport.badge_color === 'yellow' ? '#ca8a04' : integrityReport.badge_color === 'orange' ? '#ea580c' : '#dc2626' }}>
+                    {integrityReport.rating}
+                  </div>
+                </div>
+
+                {/* Violation Counts */}
+                <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '10px' }}>
+                  {[
+                    { label: 'Soft Flags', value: integrityReport.soft_flags, color: '#f59e0b' },
+                    { label: 'Hard Flags', value: integrityReport.hard_flags, color: '#ef4444' },
+                    { label: 'Total Events', value: integrityReport.total_violations, color: '#6366f1' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.6rem', fontWeight: '800', color }}>{value}</div>
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: '600', marginTop: '4px' }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Violations Table */}
+              {violations.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                        {['Event Type', 'Severity', 'Time'].map(h => (
+                          <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: '600', fontSize: '0.75rem', letterSpacing: '0.06em' }}>{h.toUpperCase()}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {violations.slice(0, 10).map((v, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <td style={{ padding: '8px 12px', color: '#e2e8f0' }}>{v.event_type?.replace(/_/g, ' ')}</td>
+                          <td style={{ padding: '8px 12px' }}>
+                            <span style={{
+                              background: v.severity === 'HARD' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                              color: v.severity === 'HARD' ? '#f87171' : '#fbbf24',
+                              border: `1px solid ${v.severity === 'HARD' ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                              borderRadius: '4px', padding: '2px 8px', fontSize: '0.72rem', fontWeight: '700'
+                            }}>{v.severity}</span>
+                          </td>
+                          <td style={{ padding: '8px 12px', color: '#94a3b8', fontFamily: 'monospace' }}>
+                            {v.occurred_at ? new Date(v.occurred_at).toLocaleTimeString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {violations.length > 10 && (
+                    <p style={{ color: '#64748b', fontSize: '0.78rem', textAlign: 'center', marginTop: '8px' }}>
+                      ...and {violations.length - 10} more events
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {violations.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#4ade80' }}>
+                  ✅ No proctoring violations recorded during this session.
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}

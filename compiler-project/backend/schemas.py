@@ -158,3 +158,46 @@ class AutoGenerateTestRequest(BaseModel):
     topic: str | None = None        # None = all topics
     difficulty: str | None = None   # None = all difficulties (balanced)
 
+
+# ── Proctoring & Violation Schemas ──────────────────────────────────────────
+class ViolationCreate(BaseModel):
+    test_id: int | None = None
+    student_name: str
+    event_type: str
+    severity: str = "SOFT"
+    details: str | dict | None = None
+
+
+class ViolationResponse(BaseModel):
+    id: int
+    test_id: int | None = None
+    student_name: str
+    event_type: str
+    severity: str
+    details: str | None = None
+    occurred_at: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProctoringTelemetryPacket(BaseModel):
+    type: str  # TAB_SWITCH, WINDOW_BLUR, LARGE_PASTE, MULTI_DISPLAY, CAMERA_FRAME
+    test_id: int | None = None
+    student_name: str
+    details: dict | None = None
+    image: str | None = None  # Base64 image data for camera analysis
+    timestamp: float | None = None
+
+
+class ProctoringStatusResponse(BaseModel):
+    status: str  # OK, SOFT_WARNING, HARD_FLAG, TERMINATE_TEST
+    severity: str  # NONE, SOFT, HARD
+    message: str
+    soft_flags_count: int = 0
+    hard_flags_count: int = 0
+    total_violations: int = 0
+    event_type: str | None = None
+    proxy_status: str | None = None
+
+

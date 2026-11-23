@@ -1,13 +1,16 @@
-# pyrefly: ignore [missing-import]
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.exc import OperationalError
 from services.piston_service import execute_code
-# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
-from schemas import RunRequest, SubmissionRequest, LoginRequest, TokenResponse, UserResponse, TemplateResponse, QuestionCreateRequest, QuestionResponse, TestCreateRequest, TestResponse, AIGenerateRequest, VectorSearchRequest, PineconeSyncResponse, AutoGenerateTestRequest
-from models import Question, TestCase, Role, User, QuestionTemplate, Test
+from schemas import (
+    RunRequest, SubmissionRequest, LoginRequest, TokenResponse, UserResponse,
+    TemplateResponse, QuestionCreateRequest, QuestionResponse, TestCreateRequest,
+    TestResponse, AIGenerateRequest, VectorSearchRequest, PineconeSyncResponse,
+    AutoGenerateTestRequest, ViolationCreate, ViolationResponse, ProctoringStatusResponse
+)
+from models import Question, TestCase, Role, User, QuestionTemplate, Test, Violation
 from services.evaluator import evaluate_output
 from services.pinecone_service import upsert_question_to_pinecone, search_questions_in_pinecone, sync_all_questions_to_pinecone
 from auth import create_access_token, get_current_user, require_role
@@ -737,6 +740,10 @@ async def finish_test(test_id: int | None = None, req: TestFinishRequest | None 
 
     score = int((solved_count / total_questions) * total_marks) if total_questions > 0 else 0
 
+    from services.proctoring_service import get_test_violations, calculate_integrity_score
+    test_violations = get_test_violations(db, test_id=target_test_id, student_name=student_name)
+    integrity_report = calculate_integrity_score(test_violations)
+
     note = generate_test_submission_note(
         test_title=test_title,
         student_name=student_name,
@@ -755,6 +762,8 @@ async def finish_test(test_id: int | None = None, req: TestFinishRequest | None 
         "total_questions": total_questions,
         "score": score,
         "total_marks": total_marks,
+        "violations": test_violations,
+        "integrity_report": integrity_report,
         "redirect_to": "dashboard"
     }
 
@@ -879,4 +888,163 @@ async def ai_generate_questions(req: AIGenerateRequest, db: Session = Depends(ge
         api_key=req.api_key,
         db_session=db
     )
+
+
+# ── PROCTORING WEBSOCKET & AGENT ENDPOINTS ──────────────────────────────────
+class ProctoringConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, test_id: str):
+        await websocket.accept()
+        if test_id not in self.active_connections:
+            self.active_connections[test_id] = []
+        self.active_connections[test_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, test_id: str):
+        if test_id in self.active_connections:
+            if websocket in self.active_connections[test_id]:
+                self.active_connections[test_id].remove(websocket)
+            if not self.active_connections[test_id]:
+                del self.active_connections[test_id]
+
+    async def broadcast(self, message: dict, test_id: str):
+        if test_id in self.active_connections:
+            for connection in self.active_connections[test_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass
+
+proctoring_manager = ProctoringConnectionManager()
+
+
+@app.websocket("/ws/proctoring/{test_id}")
+async def proctoring_websocket(
+    websocket: WebSocket,
+    test_id: int
+):
+    """
+    Real-time WebSocket Proctoring Agent listener on the client.
+    Tracks DOM events: visibilitychange (tab switches), blur (window defocus),
+    paste (large clipboard transfers), multi-display detection,
+    and camera frames to detect face presence and proxy candidates.
+    Logs events into the Violations table and raises soft/hard flags based on severity thresholds.
+    """
+    from services.proctoring_service import record_violation, analyze_camera_frame
+    from database import SessionLocal
+
+    str_test_id = str(test_id)
+    await proctoring_manager.connect(websocket, str_test_id)
+
+    db = SessionLocal()
+    try:
+        # Acknowledge connection
+        await websocket.send_json({
+            "status": "CONNECTED",
+            "test_id": test_id,
+            "message": "Proctoring agent active and listening."
+        })
+
+        while True:
+            data = await websocket.receive_json()
+            event_type = data.get("type", "UNKNOWN")
+            student_name = data.get("student_name", "Student")
+            details = data.get("details", {}) or {}
+
+            # Handle Camera Frame Analysis
+            if event_type == "CAMERA_FRAME":
+                image_b64 = data.get("image", "")
+                analysis = analyze_camera_frame(image_b64)
+
+                if analysis.get("is_violation"):
+                    violation_event = analysis.get("event_type", "PROXY_SUSPECT")
+                    details["proxy_status"] = analysis.get("proxy_status")
+                    details["face_count"] = analysis.get("face_count", 0)
+                    details["confidence"] = analysis.get("confidence", 0.0)
+                    details["message"] = analysis.get("message")
+                    suggested_sev = analysis.get("suggested_severity", "HARD")
+
+                    result = record_violation(
+                        db=db,
+                        test_id=test_id,
+                        student_name=student_name,
+                        event_type=violation_event,
+                        details=details,
+                        severity_override=suggested_sev
+                    )
+                    result["proxy_analysis"] = analysis
+                    await websocket.send_json(result)
+                else:
+                    await websocket.send_json({
+                        "status": "OK",
+                        "proxy_status": analysis.get("proxy_status", "VERIFIED_SINGLE_FACE"),
+                        "face_count": analysis.get("face_count", 1),
+                        "message": analysis.get("message", "Candidate verified.")
+                    })
+
+            # Handle DOM and System Telemetry Events: TAB_SWITCH, WINDOW_BLUR, LARGE_PASTE, MULTI_DISPLAY
+            elif event_type in ("TAB_SWITCH", "WINDOW_BLUR", "LARGE_PASTE", "MULTI_DISPLAY"):
+                result = record_violation(
+                    db=db,
+                    test_id=test_id,
+                    student_name=student_name,
+                    event_type=event_type,
+                    details=details
+                )
+                await websocket.send_json(result)
+
+            elif event_type == "HEARTBEAT":
+                await websocket.send_json({"status": "PONG", "timestamp": data.get("timestamp")})
+
+            else:
+                result = record_violation(
+                    db=db,
+                    test_id=test_id,
+                    student_name=student_name,
+                    event_type=event_type,
+                    details=details
+                )
+                await websocket.send_json(result)
+
+    except WebSocketDisconnect:
+        proctoring_manager.disconnect(websocket, str_test_id)
+    except Exception as e:
+        print(f"[WebSocket Proctoring Error] {e}")
+        proctoring_manager.disconnect(websocket, str_test_id)
+    finally:
+        db.close()
+
+
+@app.get("/tests/{test_id}/violations")
+def get_violations_for_test(test_id: int, student_name: str | None = None, db: Session = Depends(get_db)):
+    """Retrieve all proctoring violations recorded for a test, with integrity scoring."""
+    from services.proctoring_service import get_test_violations, calculate_integrity_score
+    violations = get_test_violations(db, test_id=test_id, student_name=student_name)
+    integrity = calculate_integrity_score(violations)
+    return {
+        "test_id": test_id,
+        "student_name": student_name,
+        "violations": violations,
+        "total_violations": len(violations),
+        "hard_flags_count": sum(1 for v in violations if v.get("severity") == "HARD"),
+        "soft_flags_count": sum(1 for v in violations if v.get("severity") == "SOFT"),
+        "integrity_report": integrity
+    }
+
+
+@app.post("/proctoring/violations")
+def log_manual_violation(req: ViolationCreate, db: Session = Depends(get_db)):
+    """REST endpoint to log a proctoring violation."""
+    from services.proctoring_service import record_violation
+    details = req.details if isinstance(req.details, dict) else ({"info": req.details} if req.details else {})
+    return record_violation(
+        db=db,
+        test_id=req.test_id,
+        student_name=req.student_name,
+        event_type=req.event_type,
+        details=details,
+        severity_override=req.severity
+    )
+
 

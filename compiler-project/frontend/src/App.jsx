@@ -4,6 +4,7 @@ import './components/LoginPage.css'
 import './components/InstructorDashboard.css'
 import InstructorDashboard from './components/InstructorDashboard'
 import EvaluationReportModal, { GreenOutlinedTick } from './components/EvaluationReportModal'
+import ProctoringWidget from './components/ProctoringWidget'
 import Editor from '@monaco-editor/react'
 
 const starterTemplates = {
@@ -65,6 +66,9 @@ function App() {
   const [instructorName, setInstructorName] = useState('');
   const [instructorNameInput, setInstructorNameInput] = useState('');
   const [instructorNamePending, setInstructorNamePending] = useState(false);
+  const [studentName, setStudentName] = useState('');
+  const [studentNameInput, setStudentNameInput] = useState('');
+  const [studentNamePending, setStudentNamePending] = useState(false);
   const outputRef = useRef(null);
   const tabContentRef = useRef(null);
 
@@ -83,13 +87,23 @@ function App() {
   const [selectedTestId, setSelectedTestId] = useState(null);
   const [selectedTest, setSelectedTest] = useState(null);
   const [hasExecuted, setHasExecuted] = useState(false);
-  // Timer state for student assessment (in seconds)
-  const [timeLeft, setTimeLeft] = useState(45 * 60);
+  // Timer state for student assessment (in seconds) - restored from active session if valid
+  const [timeLeft, setTimeLeft] = useState(() => {
+    const savedEndTime = localStorage.getItem('examEndTime');
+    if (savedEndTime) {
+      const remaining = Math.round((parseInt(savedEndTime, 10) - Date.now()) / 1000);
+      return Math.max(0, remaining);
+    }
+    return 45 * 60;
+  });
 
   // Student Exam Evaluation & Performance Tracking State
   const [solvedQuestionIds, setSolvedQuestionIds] = useState([]);
   const [questionSubmissions, setQuestionSubmissions] = useState({});
-  const [examStartTime, setExamStartTime] = useState(() => Date.now());
+  const [examStartTime, setExamStartTime] = useState(() => {
+    const savedStart = localStorage.getItem('examStartTime');
+    return savedStart ? parseInt(savedStart, 10) : Date.now();
+  });
   const [isExamFinished, setIsExamFinished] = useState(false);
   const [showEvaluationReport, setShowEvaluationReport] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
@@ -114,42 +128,57 @@ function App() {
   const [isCreatingTest, setIsCreatingTest] = useState(false);
   const [autoGenError, setAutoGenError] = useState('');
 
-  useEffect(() => {
-    if (selectedTest?.duration_minutes) {
-      setTimeLeft(selectedTest.duration_minutes * 60);
-    }
-  }, [selectedTest]);
-
-  // Exam timer with auto-completion
+  // Exam countdown timer
   useEffect(() => {
     if (selectedRole !== 'Student' || isExamFinished) return;
+
+    // Tick every second using wall-clock synchronization
     const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
+      const savedEndTime = localStorage.getItem('examEndTime');
+      if (savedEndTime) {
+        const remaining = Math.round((parseInt(savedEndTime, 10) - Date.now()) / 1000);
+        if (remaining <= 0) {
           clearInterval(timer);
-          setIsExamFinished(true);
-          setShowEvaluationReport(true);
-          return 0;
+          setTimeLeft(0);
+        } else {
+          setTimeLeft(remaining);
         }
-        return prev - 1;
-      });
+      } else {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }
     }, 1000);
+
     return () => clearInterval(timer);
   }, [selectedRole, isExamFinished]);
 
+  // When timer reaches 0 during an active student exam, trigger auto-submit
+  useEffect(() => {
+    if (selectedRole === 'Student' && !isExamFinished && timeLeft === 0) {
+      handleConfirmFinishExam(true);
+    }
+  }, [timeLeft, selectedRole, isExamFinished]);
+
   const formatTime = (totalSeconds) => {
-    const hrs = Math.floor(totalSeconds / 3600);
-    const mins = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
+    const validSec = Math.max(0, Math.floor(totalSeconds || 0));
+    const hrs = Math.floor(validSec / 3600);
+    const mins = Math.floor((validSec % 3600) / 60);
+    const secs = validSec % 60;
     return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   const calculateTimeTakenSeconds = () => {
     const totalAllottedSec = (selectedTest?.duration_minutes || 45) * 60;
     const elapsedFromTimer = totalAllottedSec - timeLeft;
-    if (elapsedFromTimer > 0) return elapsedFromTimer;
+    if (elapsedFromTimer > 0) return Math.min(elapsedFromTimer, totalAllottedSec);
     if (examStartTime) {
-      return Math.max(1, Math.round((Date.now() - examStartTime) / 1000));
+      const elapsedFromStart = Math.round((Date.now() - examStartTime) / 1000);
+      if (elapsedFromStart > 0) return Math.min(elapsedFromStart, totalAllottedSec);
     }
     return 60;
   };
@@ -158,7 +187,11 @@ function App() {
     setShowFinishConfirm(true);
   };
 
-  const handleConfirmFinishExam = async () => {
+  const handleProctoringTermination = (reason) => {
+    handleConfirmFinishExam(true);
+  };
+
+  const handleConfirmFinishExam = async (isAutoSubmit = false) => {
     setShowFinishConfirm(false);
     const API_BASE = 'http://127.0.0.1:8000';
     const targetTestId = selectedTestId || selectedTest?.id || 1;
@@ -169,13 +202,13 @@ function App() {
     const questionsSnap = [...questionsList];
     const submissionsSnap = { ...questionSubmissions };
     const testSnap = selectedTest;
-    const studentSnap = user?.name || 'Student';
+    const studentSnap = studentName || user?.name || 'Student';
     const durationSnap = selectedTest?.duration_minutes || 45;
 
     try {
       const payload = {
         test_id: targetTestId,
-        student_name: user?.name || 'Student',
+        student_name: studentSnap,
         solved_questions: solvedQuestionIds,
         question_submissions: questionSubmissions,
         time_taken_seconds: timeTaken
@@ -187,10 +220,30 @@ function App() {
         body: JSON.stringify(payload)
       });
 
-      let noteText = 'Your test has been successfully submitted and finalized!';
+      let noteText = isAutoSubmit
+        ? "Time's up! Your assessment has been automatically submitted."
+        : 'Your test has been successfully submitted and finalized!';
+      let integrityReport = null;
+      let violationsList = [];
       if (res.ok) {
         const data = await res.json();
         if (data.note) noteText = data.note;
+        if (data.integrity_report) integrityReport = data.integrity_report;
+        if (data.violations) violationsList = data.violations;
+      }
+
+      // Fetch violations separately if not included in finish response
+      if (!integrityReport) {
+        try {
+          const vRes = await fetch(
+            `${API_BASE}/tests/${targetTestId}/violations?student_name=${encodeURIComponent(studentSnap)}`
+          );
+          if (vRes.ok) {
+            const vData = await vRes.json();
+            integrityReport = vData.integrity_report || null;
+            violationsList = vData.violations || [];
+          }
+        } catch (_) { /* violations fetch is non-critical */ }
       }
 
       // Show styled in-app submission note instead of alert()
@@ -205,13 +258,17 @@ function App() {
         questionSubmissions: submissionsSnap,
         testInfo: testSnap,
         studentName: studentSnap,
-        totalDurationMinutes: durationSnap
+        totalDurationMinutes: durationSnap,
+        integrityReport,
+        violations: violationsList
       });
       setShowSubmissionNote(true);
     } catch (err) {
       console.error('Error finishing test:', err);
       setSubmissionNoteData({
-        noteText: 'Your test has been submitted successfully!',
+        noteText: isAutoSubmit
+          ? "Time's up! Your test has been submitted."
+          : 'Your test has been submitted successfully!',
         solvedCount: solvedQuestionIds.length,
         totalQuestions: questionsList.length,
         timeTakenSeconds: timeTaken,
@@ -219,7 +276,7 @@ function App() {
         solvedQuestionIds: [...solvedQuestionIds],
         questionSubmissions: { ...questionSubmissions },
         testInfo: selectedTest,
-        studentName: user?.name || 'Student',
+        studentName: studentSnap,
         totalDurationMinutes: selectedTest?.duration_minutes || 45
       });
       setShowSubmissionNote(true);
@@ -230,6 +287,8 @@ function App() {
       setSelectedTest(null);
       localStorage.removeItem('activeTestId');
       localStorage.removeItem('activeTest');
+      localStorage.removeItem('examStartTime');
+      localStorage.removeItem('examEndTime');
     }
   };
 
@@ -237,7 +296,11 @@ function App() {
   const handleDismissSubmissionNote = () => {
     setShowSubmissionNote(false);
     setSubmissionNoteData(null);
+    setIsExamFinished(false);
     setSelectedRole(null);
+    if (testsList.length > 0) {
+      handleTestSelect(testsList[0], true);
+    }
   };
 
   // Called when student wants to see the detailed report from the submission note
@@ -257,24 +320,53 @@ function App() {
     sampleOutput: ''
   });
 
-  const handleTestSelect = (testObj) => {
+  const handleTestSelect = (testObj, forceNew = false) => {
     if (!testObj) return;
     setSelectedTestId(testObj.id);
     setSelectedTest(testObj);
     localStorage.setItem('activeTestId', testObj.id.toString());
     localStorage.setItem('activeTest', JSON.stringify(testObj));
-    // Reset test progress for new test session
-    setSolvedQuestionIds([]);
-    setQuestionSubmissions({});
-    setExamStartTime(Date.now());
     setIsExamFinished(false);
     setShowEvaluationReport(false);
-    if (testObj.duration_minutes) {
-      setTimeLeft(testObj.duration_minutes * 60);
+
+    const savedEndTime = localStorage.getItem('examEndTime');
+    const savedActiveId = localStorage.getItem('activeTestId');
+    const isSameActiveTest = savedActiveId && parseInt(savedActiveId, 10) === testObj.id;
+
+    if (!forceNew && isSameActiveTest && savedEndTime) {
+      // Resume active session
+      const remaining = Math.max(0, Math.round((parseInt(savedEndTime, 10) - Date.now()) / 1000));
+      setTimeLeft(remaining);
+      const savedStart = localStorage.getItem('examStartTime');
+      if (savedStart) {
+        setExamStartTime(parseInt(savedStart, 10));
+      }
+    } else {
+      // Initialize fresh assessment session
+      setSolvedQuestionIds([]);
+      setQuestionSubmissions({});
+      const durationSec = (testObj.duration_minutes || 45) * 60;
+      const now = Date.now();
+      setExamStartTime(now);
+      setTimeLeft(durationSec);
+      localStorage.setItem('examStartTime', now.toString());
+      localStorage.setItem('examEndTime', (now + durationSec * 1000).toString());
     }
+
     if (testObj.questions && testObj.questions.length > 0) {
       setQuestionsList(testObj.questions);
       loadQuestion(testObj.questions[0].id, testObj.questions, 0);
+    }
+  };
+
+  const handleStartStudentExam = (name = studentName) => {
+    setIsExamFinished(false);
+    setSelectedRole('Student');
+    const finalName = name || studentName || user?.name || 'Student';
+    setStudentName(finalName);
+    setUser(prev => ({ ...(prev || {}), name: finalName, role: 'Student' }));
+    if (!selectedTest && testsList.length > 0) {
+      handleTestSelect(testsList[0], false);
     }
   };
 
@@ -483,7 +575,7 @@ function App() {
       }
       const createdTest = await res.json();
       setTestsList(prev => [createdTest, ...prev]);
-      handleTestSelect(createdTest);
+      handleTestSelect(createdTest, true);
       setIsStudentTestModalOpen(false);
       // Reset form
       setNewTestTitle('');
@@ -709,6 +801,10 @@ function App() {
     setInstructorName('');
     setInstructorNameInput('');
     setInstructorNamePending(false);
+    setStudentName('');
+    setStudentNameInput('');
+    setStudentNamePending(false);
+    setIsExamFinished(false);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
   };
@@ -782,6 +878,72 @@ function App() {
     );
   }
 
+  // ── Student name prompt (checked BEFORE role picker) ─────────────────────
+  if (studentNamePending && !selectedRole) {
+    const handleStudentNameSubmit = (e) => {
+      e.preventDefault();
+      const trimmed = studentNameInput.trim();
+      if (!trimmed) return;
+      setStudentName(trimmed);
+      setStudentNamePending(false);
+      handleStartStudentExam(trimmed);
+    };
+
+    return (
+      <div className="login-page-container">
+        <div className="bg-decor-circle-left" />
+        <div className="bg-decor-circle-right" />
+        <div className="bg-dots-pattern dots-top-left" />
+        <div className="bg-dots-pattern dots-top-right" />
+        <div className="login-card" style={{ maxWidth: 440 }}>
+          <div className="login-header">
+            <div className="icon-badge student-icon-badge" style={{ margin: '0 auto 1.25rem' }}>
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+                <path d="M6 12v5c3 3 9 3 12 0v-5" />
+              </svg>
+            </div>
+            <h1>Welcome, Student!</h1>
+            <p>Enter your name to start your assessment</p>
+          </div>
+          <form className="role-form" onSubmit={handleStudentNameSubmit}>
+            <div className="input-wrapper">
+              <div className="input-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                className="role-input"
+                placeholder="e.g. Alex Morgan"
+                value={studentNameInput}
+                onChange={(e) => setStudentNameInput(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <button
+              type="submit"
+              className="submit-btn"
+              disabled={!studentNameInput.trim()}
+            >
+              Start Assessment →
+            </button>
+            <button
+              type="button"
+              className="submit-btn"
+              style={{ background: 'transparent', color: '#64748b', border: '1.5px solid #e2e8f0', marginTop: '0.5rem' }}
+              onClick={() => setStudentNamePending(false)}
+            >
+              ← Back
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   // ── Role picker ──────────────────────────────────────────────────────────
   if (!selectedRole) {
     return (
@@ -844,7 +1006,7 @@ function App() {
               </p>
               <button
                 className="submit-btn"
-                onClick={() => setSelectedRole('Student')}
+                onClick={() => setStudentNamePending(true)}
               >
                 Continue as Student
               </button>
@@ -879,7 +1041,10 @@ function App() {
                 }}
               />
             </div>
-            <div className="timer-badge" title="Remaining Time">
+            <div
+              className={`timer-badge ${timeLeft <= 300 ? 'timer-warning' : ''} ${timeLeft <= 60 ? 'timer-critical' : ''}`}
+              title="Remaining Time"
+            >
               <span className="timer-icon">⏱</span>
               <span className="timer-text">{formatTime(timeLeft)}</span>
             </div>
@@ -891,6 +1056,10 @@ function App() {
             >
               <GreenOutlinedTick size={15} />
               <span>{solvedQuestionIds.length}/{questionsList.length || 1} Solved</span>
+            </div>
+            <div className="proctor-shield-badge" title="Real-time AI Proctoring Active">
+              <span className="proctor-shield-icon">🛡️</span>
+              <span className="proctor-shield-text">Proctored</span>
             </div>
             <button
               className="student-test-btn"
@@ -905,6 +1074,25 @@ function App() {
           </div>
 
           <div className="header-right">
+            {studentName && (
+              <span
+                className="student-name-badge"
+                style={{
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  color: '#94a3b8',
+                  background: '#1e293b',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #334155',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                👤 {studentName}
+              </span>
+            )}
             <button
               className="finish-exam-btn"
               onClick={handleFinishExamClick}
@@ -1459,7 +1647,11 @@ function App() {
               setSolvedQuestionIds([]);
               setQuestionSubmissions({});
               setSubmissionNoteData(null);
+              setIsExamFinished(false);
               setSelectedRole(null);
+              if (testsList.length > 0) {
+                handleTestSelect(testsList[0], true);
+              }
             }
           }}
           testInfo={submissionNoteData?.testInfo || selectedTest}
@@ -1468,11 +1660,26 @@ function App() {
           questionSubmissions={submissionNoteData?.questionSubmissions || questionSubmissions}
           timeTakenSeconds={submissionNoteData?.timeTakenSeconds || calculateTimeTakenSeconds()}
           totalDurationMinutes={submissionNoteData?.totalDurationMinutes || selectedTest?.duration_minutes || 45}
-          studentName={submissionNoteData?.studentName || user?.name || 'Student'}
+          studentName={submissionNoteData?.studentName || studentName || user?.name || 'Student'}
+          integrityReport={submissionNoteData?.integrityReport || null}
+          violations={submissionNoteData?.violations || []}
           onRetakeOrNewTest={() => {
             setIsStudentTestModalOpen(true);
           }}
         />
+
+        {/* ── Proctoring Agent Widget ── */}
+        {!isExamFinished && (
+          <ProctoringWidget
+            testId={selectedTestId || selectedTest?.id || 1}
+            studentName={studentName || user?.name || 'Student'}
+            onViolationOccurred={(data) => {
+              console.log('[Proctoring] Violation:', data);
+            }}
+            onTerminateTest={handleProctoringTermination}
+            isExamFinished={isExamFinished}
+          />
+        )}
       </div>
     );
   }

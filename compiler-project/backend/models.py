@@ -80,3 +80,18 @@ class Test(Base):
 
     # Many-to-many relationship with Question
     questions = relationship("Question", secondary=test_questions, backref="tests")
+
+
+class Violation(Base):
+    __tablename__ = "violations"
+    id = Column(Integer, primary_key=True, index=True)
+    test_id = Column(Integer, ForeignKey("tests.id", ondelete="CASCADE"), nullable=True, index=True)
+    student_name = Column(String(255), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(String(50), nullable=False)  # TAB_SWITCH, WINDOW_BLUR, LARGE_PASTE, MULTI_DISPLAY, NO_FACE, MULTIPLE_FACES, PROXY_SUSPECT, CAMERA_TAMPER
+    severity = Column(String(20), default="SOFT")    # SOFT or HARD
+    details = Column(Text, nullable=True)            # JSON metadata string
+    occurred_at = Column(DateTime, default=datetime.utcnow)
+
+    test = relationship("Test", backref="violations")
+
