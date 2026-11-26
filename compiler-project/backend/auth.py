@@ -6,12 +6,15 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import User, Role
+from passlib.context import CryptContext
 
 SECRET_KEY = os.getenv("JWT_SECRET", "super_secret_jwt_key_compiler_app_2026")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 def get_db():
     db = SessionLocal()
@@ -19,6 +22,18 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def hash_password(plain: str) -> str:
+    return pwd_context.hash(plain)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return pwd_context.verify(plain, hashed)
+    except Exception:
+        return False
+
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
@@ -29,6 +44,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
 
 def decode_access_token(token: str) -> dict:
     try:
@@ -46,6 +62,7 @@ def decode_access_token(token: str) -> dict:
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
 
 def get_current_user(token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     if not token:
@@ -70,6 +87,7 @@ def get_current_user(token: str | None = Depends(oauth2_scheme), db: Session = D
         )
     return user
 
+
 def require_role(allowed_roles: list[str]):
     def role_checker(current_user: User = Depends(get_current_user)):
         if not current_user.role or current_user.role.name not in allowed_roles:
@@ -79,3 +97,4 @@ def require_role(allowed_roles: list[str]):
             )
         return current_user
     return role_checker
+

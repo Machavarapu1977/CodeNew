@@ -19,9 +19,19 @@ class SubmissionRequest(BaseModel):
 
 # Auth and RBAC Schemas
 class LoginRequest(BaseModel):
+    email: str
+    password: str
+    role: str  # "Instructor" or "Student"
+
+class RegisterRequest(BaseModel):
     name: str
     email: str
-    role: str # "Instructor" or "Student"
+    password: str
+    role: str  # "Instructor" or "Student"
+
+class GoogleAuthRequest(BaseModel):
+    credential: str   # Google ID token (JWT from GSI)
+    role: str         # "Instructor" or "Student"
 
 class UserResponse(BaseModel):
     id: int

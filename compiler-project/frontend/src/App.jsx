@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import './App.css'
-import './components/LoginPage.css'
 import './components/InstructorDashboard.css'
 import InstructorDashboard from './components/InstructorDashboard'
 import EvaluationReportModal, { GreenOutlinedTick } from './components/EvaluationReportModal'
 import ProctoringWidget from './components/ProctoringWidget'
+import AuthPage from './components/AuthPage'
+import ProctoringRulesModal from './components/ProctoringRulesModal'
+import CameraPermissionModal from './components/CameraPermissionModal'
 import Editor from '@monaco-editor/react'
 
 const starterTemplates = {
@@ -29,17 +31,27 @@ function App() {
   })
 
   const handleLoginSuccess = (authToken, userData) => {
-    localStorage.setItem('token', authToken)
-    // Simplify user object for UI
+    localStorage.setItem('token', authToken);
+    const role = userData.role || 'Student';
     const simplifiedUser = {
-      role: userData.role || 'Instructor',
-      name: userData.name || userData.username || 'Instructor',
-      email: userData.email || ''
+      role: role,
+      name: userData.name || userData.username || (role === 'Instructor' ? 'Instructor' : 'Student'),
+      email: userData.email || '',
+      id: userData.id
     };
-    localStorage.setItem('user', JSON.stringify(simplifiedUser))
-    setToken(authToken)
-    setUser(simplifiedUser)
-  }
+    localStorage.setItem('user', JSON.stringify(simplifiedUser));
+    setToken(authToken);
+    setUser(simplifiedUser);
+    setSelectedRole(role);
+    if (role === 'Instructor') {
+      setInstructorName(simplifiedUser.name);
+      setPreExamStep('idle');
+    } else {
+      setStudentName(simplifiedUser.name);
+      const verified = sessionStorage.getItem('proctoringVerified');
+      setPreExamStep(verified ? 'ready' : 'rules');
+    }
+  };
 
   const [code, setCode] = useState(starterTemplates['Python 3'])
   const [language, setLanguage] = useState('Python 3')
@@ -62,11 +74,34 @@ function App() {
   })
   const [showOutputWindow, setShowOutputWindow] = useState(false)
   const [isNavOpen, setIsNavOpen] = useState(true);
-  const [selectedRole, setSelectedRole] = useState(null);
-  const [instructorName, setInstructorName] = useState('');
+  const [selectedRole, setSelectedRole] = useState(() => {
+    try {
+      const saved = localStorage.getItem('user');
+      return saved ? JSON.parse(saved).role : null;
+    } catch {
+      return null;
+    }
+  });
+  const [instructorName, setInstructorName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('user');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return parsed && parsed.role === 'Instructor' ? parsed.name : '';
+    } catch {
+      return '';
+    }
+  });
   const [instructorNameInput, setInstructorNameInput] = useState('');
   const [instructorNamePending, setInstructorNamePending] = useState(false);
-  const [studentName, setStudentName] = useState('');
+  const [studentName, setStudentName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('user');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return parsed && parsed.role === 'Student' ? parsed.name : '';
+    } catch {
+      return '';
+    }
+  });
   const [studentNameInput, setStudentNameInput] = useState('');
   const [studentNamePending, setStudentNamePending] = useState(false);
   const outputRef = useRef(null);
@@ -109,6 +144,21 @@ function App() {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [showSubmissionNote, setShowSubmissionNote] = useState(false);
   const [submissionNoteData, setSubmissionNoteData] = useState(null);
+
+  // Pre-exam flow: rules → camera permissions → exam
+  // 'idle' | 'rules' | 'camera' | 'ready'
+  const [preExamStep, setPreExamStep] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      const parsed = savedUser ? JSON.parse(savedUser) : null;
+      if (parsed && parsed.role === 'Student') {
+        const verified = sessionStorage.getItem('proctoringVerified');
+        return verified ? 'ready' : 'rules';
+      }
+    } catch {}
+    return 'idle';
+  });
+  const [pendingTestInfo, setPendingTestInfo] = useState(null); // test object queued before pre-exam flow
 
   // Student Mock Test Creation Modal State
   const [isStudentTestModalOpen, setIsStudentTestModalOpen] = useState(false);
@@ -805,220 +855,71 @@ function App() {
     setStudentNameInput('');
     setStudentNamePending(false);
     setIsExamFinished(false);
+    setPreExamStep('idle');
+    setPendingTestInfo(null);
+    sessionStorage.removeItem('proctoringVerified');
+    setUser(null);
+    setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('activeTestId');
+    localStorage.removeItem('activeTest');
+    localStorage.removeItem('examStartTime');
+    localStorage.removeItem('examEndTime');
   };
 
+  // ── 1. Auth gate: show AuthPage if not logged in ──────────────────────────
+  if (!user || !token) {
+    return <AuthPage onLoginSuccess={handleLoginSuccess} />;
+  }
 
-  // ── Instructor name prompt (checked BEFORE role picker) ───────────────────
-  if (instructorNamePending && !selectedRole) {
-    const handleNameSubmit = (e) => {
-      e.preventDefault();
-      const trimmed = instructorNameInput.trim();
-      if (!trimmed) return;
-      setInstructorName(trimmed);
-      setInstructorNamePending(false);
-      setSelectedRole('Instructor');
-    };
-
+  // ── 2. Pre-exam flow for Students: Rules → Camera ─────────────────────────
+  if (selectedRole === 'Student' && preExamStep === 'rules') {
     return (
-      <div className="login-page-container">
-        <div className="bg-decor-circle-left" />
-        <div className="bg-decor-circle-right" />
-        <div className="bg-dots-pattern dots-top-left" />
-        <div className="bg-dots-pattern dots-top-right" />
-        <div className="login-card" style={{ maxWidth: 440 }}>
-          <div className="login-header">
-            <div className="icon-badge instructor-icon-badge" style={{ margin: '0 auto 1.25rem' }}>
-              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="9" cy="7" r="4" />
-                <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-                <path d="M16 3h5v8h-5z" />
-                <path d="M16 11l4 4" />
-              </svg>
-            </div>
-            <h1>Welcome, Instructor!</h1>
-            <p>Enter your name to personalise your dashboard</p>
-          </div>
-          <form className="role-form" onSubmit={handleNameSubmit}>
-            <div className="input-wrapper">
-              <div className="input-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                className="role-input"
-                placeholder="e.g. Dr. Sarah Connor"
-                value={instructorNameInput}
-                onChange={(e) => setInstructorNameInput(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <button
-              type="submit"
-              className="submit-btn"
-              disabled={!instructorNameInput.trim()}
-            >
-              Enter Dashboard →
-            </button>
-            <button
-              type="button"
-              className="submit-btn"
-              style={{ background: 'transparent', color: '#64748b', border: '1.5px solid #e2e8f0', marginTop: '0.5rem' }}
-              onClick={() => setInstructorNamePending(false)}
-            >
-              ← Back
-            </button>
-          </form>
-        </div>
-      </div>
+      <ProctoringRulesModal
+        testInfo={pendingTestInfo || selectedTest}
+        studentName={studentName || user?.name}
+        onAccept={() => setPreExamStep('camera')}
+        onBack={() => {
+          handleLogout();
+        }}
+      />
     );
   }
 
-  // ── Student name prompt (checked BEFORE role picker) ─────────────────────
-  if (studentNamePending && !selectedRole) {
-    const handleStudentNameSubmit = (e) => {
-      e.preventDefault();
-      const trimmed = studentNameInput.trim();
-      if (!trimmed) return;
-      setStudentName(trimmed);
-      setStudentNamePending(false);
-      handleStartStudentExam(trimmed);
-    };
-
+  if (selectedRole === 'Student' && preExamStep === 'camera') {
     return (
-      <div className="login-page-container">
-        <div className="bg-decor-circle-left" />
-        <div className="bg-decor-circle-right" />
-        <div className="bg-dots-pattern dots-top-left" />
-        <div className="bg-dots-pattern dots-top-right" />
-        <div className="login-card" style={{ maxWidth: 440 }}>
-          <div className="login-header">
-            <div className="icon-badge student-icon-badge" style={{ margin: '0 auto 1.25rem' }}>
-              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                <path d="M6 12v5c3 3 9 3 12 0v-5" />
-              </svg>
-            </div>
-            <h1>Welcome, Student!</h1>
-            <p>Enter your name to start your assessment</p>
-          </div>
-          <form className="role-form" onSubmit={handleStudentNameSubmit}>
-            <div className="input-wrapper">
-              <div className="input-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                className="role-input"
-                placeholder="e.g. Alex Morgan"
-                value={studentNameInput}
-                onChange={(e) => setStudentNameInput(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <button
-              type="submit"
-              className="submit-btn"
-              disabled={!studentNameInput.trim()}
-            >
-              Start Assessment →
-            </button>
-            <button
-              type="button"
-              className="submit-btn"
-              style={{ background: 'transparent', color: '#64748b', border: '1.5px solid #e2e8f0', marginTop: '0.5rem' }}
-              onClick={() => setStudentNamePending(false)}
-            >
-              ← Back
-            </button>
-          </form>
-        </div>
-      </div>
+      <CameraPermissionModal
+        onPermissionsGranted={() => {
+          sessionStorage.setItem('proctoringVerified', 'true');
+          const tInfo = pendingTestInfo;
+          setPendingTestInfo(null);
+          setPreExamStep('ready');
+          if (tInfo) {
+            handleTestSelect(tInfo, true);
+          } else if (selectedTest) {
+            handleTestSelect(selectedTest, false);
+          }
+        }}
+        onBack={() => setPreExamStep('rules')}
+      />
     );
   }
 
-  // ── Role picker ──────────────────────────────────────────────────────────
+  // Fallback if role is not resolved
   if (!selectedRole) {
-    return (
-      <div className="login-page-container">
-        {/* Background decorative elements (reused from LoginPage) */}
-        <div className="bg-decor-circle-left" />
-        <div className="bg-decor-circle-right" />
-        <div className="bg-dots-pattern dots-top-left" />
-        <div className="bg-dots-pattern dots-top-right" />
-
-        <div className="login-card">
-          {/* Header */}
-          <div className="login-header">
-            <h1>Welcome</h1>
-            <p>Select your role to continue</p>
-          </div>
-
-          {/* Role cards */}
-          <div className="login-roles-grid">
-            {/* Instructor card */}
-            <div className="role-card instructor-card">
-              <div className="icon-badge instructor-icon-badge">
-                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-                  <path d="M16 3h5v8h-5z" />
-                  <path d="M16 11l4 4" />
-                </svg>
-              </div>
-              <h2 className="role-title">Instructor</h2>
-              <p className="role-description">
-                Create and manage questions, tests, and track student performance.
-              </p>
-              <button
-                className="submit-btn"
-                onClick={() => setInstructorNamePending(true)}
-              >
-                Continue as Instructor
-              </button>
-
-            </div>
-
-            {/* Divider */}
-            <div className="divider-container">
-              <div className="divider-line" />
-              <div className="or-badge">OR</div>
-            </div>
-
-            {/* Student card */}
-            <div className="role-card student-card">
-              <div className="icon-badge student-icon-badge">
-                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                  <path d="M6 12v5c3 3 9 3 12 0v-5" />
-                </svg>
-              </div>
-              <h2 className="role-title">Student</h2>
-              <p className="role-description">
-                Take mock tests, solve problems, and track your progress.
-              </p>
-              <button
-                className="submit-btn"
-                onClick={() => setStudentNamePending(true)}
-              >
-                Continue as Student
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    if (user?.role) {
+      setSelectedRole(user.role);
+    }
+    return null;
   }
 
   // ── Dashboards ───────────────────────────────────────────────────────────
-  const demoUser = { name: instructorName || 'Instructor', role: selectedRole, email: '' };
+  const demoUser = {
+    name: (selectedRole === 'Instructor' ? instructorName : studentName) || user?.name || (selectedRole === 'Instructor' ? 'Instructor' : 'Student'),
+    role: selectedRole,
+    email: user?.email || ''
+  };
 
   if (selectedRole === 'Instructor') {
     return <InstructorDashboard user={demoUser} onLogout={handleLogout} />;

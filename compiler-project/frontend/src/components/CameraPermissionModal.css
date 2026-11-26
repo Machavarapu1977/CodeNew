@@ -1,0 +1,176 @@
+/* ── Camera Permission Modal ── */
+.cam-perm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9100;
+  padding: 20px;
+}
+
+.cam-perm-modal {
+  background: #0f172a;
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 520px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+}
+
+/* Header */
+.cam-perm-header { display: flex; align-items: center; gap: 16px; }
+.cam-perm-header-icon { font-size: 2.2rem; flex-shrink: 0; }
+.cam-perm-title { font-size: 1.35rem; font-weight: 800; color: #f1f5f9; margin: 0 0 4px; }
+.cam-perm-sub  { color: #64748b; font-size: 0.85rem; margin: 0; }
+
+/* Video preview */
+.cam-perm-preview-area {
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0d1526;
+  border: 1.5px solid rgba(255,255,255,0.08);
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.cam-perm-video-wrap { width: 100%; position: relative; }
+.cam-perm-video { width: 100%; display: block; transform: scaleX(-1); border-radius: 12px; }
+.cam-perm-face-check,
+.cam-perm-face-ok {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.75);
+  color: #fbbf24;
+  font-size: 0.8rem;
+  padding: 5px 14px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.cam-perm-face-ok { color: #4ade80; }
+.cam-perm-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: #334155;
+  padding: 32px;
+}
+.cam-perm-placeholder-icon { font-size: 2.5rem; opacity: 0.4; }
+.cam-perm-placeholder p { font-size: 0.85rem; margin: 0; }
+
+/* Status list */
+.cam-perm-status-list { display: flex; flex-direction: column; gap: 10px; }
+.cam-perm-status-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  transition: border-color 0.2s;
+}
+.cam-perm-status-item.item-granted { border-color: rgba(16,185,129,0.3); background: rgba(16,185,129,0.06); }
+.cam-perm-status-item.item-denied  { border-color: rgba(239,68,68,0.3);  background: rgba(239,68,68,0.06);  }
+.perm-status-icon { font-size: 1.3rem; width: 28px; text-align: center; flex-shrink: 0; }
+.perm-idle        { color: #334155; font-size: 1rem; }
+.perm-requesting  { animation: spin 1s linear infinite; display: inline-block; }
+.perm-granted     { }
+.perm-denied      { }
+@keyframes spin { to { transform: rotate(360deg); } }
+.cam-perm-status-text { display: flex; flex-direction: column; gap: 2px; }
+.cam-perm-status-label { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; }
+.cam-perm-status-desc  { font-size: 0.78rem; color: #64748b; }
+
+/* Tips */
+.cam-perm-tips {
+  background: rgba(59,130,246,0.08);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.83rem;
+  color: #93c5fd;
+  line-height: 1.5;
+}
+.cam-perm-tips p { margin: 0; }
+
+/* Error */
+.cam-perm-error {
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.83rem;
+  color: #fca5a5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cam-perm-error-hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+/* Actions */
+.cam-perm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cam-perm-btn-back {
+  background: none;
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 11px 20px;
+  color: #64748b;
+  font-size: 0.88rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.cam-perm-btn-back:hover { border-color: rgba(255,255,255,0.2); color: #94a3b8; }
+
+.cam-perm-btn-request {
+  flex: 1;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border: none;
+  border-radius: 10px;
+  padding: 12px 20px;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.cam-perm-btn-request:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(59,130,246,0.4); }
+.cam-perm-btn-request:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cam-perm-btn-proceed {
+  flex: 1;
+  background: linear-gradient(135deg, #10b981, #059669);
+  border: none;
+  border-radius: 10px;
+  padding: 12px 20px;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.cam-perm-btn-proceed:hover { box-shadow: 0 4px 20px rgba(16,185,129,0.4); }

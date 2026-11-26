@@ -15,6 +15,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=True)  # nullable for legacy/google users
+    google_id = Column(String(255), nullable=True, unique=True)   # for Google OAuth
+    avatar_url = Column(String(500), nullable=True)
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

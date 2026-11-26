@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from schemas import (
-    RunRequest, SubmissionRequest, LoginRequest, TokenResponse, UserResponse,
+    RunRequest, SubmissionRequest, LoginRequest, RegisterRequest, GoogleAuthRequest,
+    TokenResponse, UserResponse,
     TemplateResponse, QuestionCreateRequest, QuestionResponse, TestCreateRequest,
     TestResponse, AIGenerateRequest, VectorSearchRequest, PineconeSyncResponse,
     AutoGenerateTestRequest, ViolationCreate, ViolationResponse, ProctoringStatusResponse
@@ -13,7 +14,7 @@ from schemas import (
 from models import Question, TestCase, Role, User, QuestionTemplate, Test, Violation
 from services.evaluator import evaluate_output
 from services.pinecone_service import upsert_question_to_pinecone, search_questions_in_pinecone, sync_all_questions_to_pinecone
-from auth import create_access_token, get_current_user, require_role
+from auth import create_access_token, get_current_user, require_role, get_db
 from dotenv import load_dotenv
 import os
 
@@ -128,14 +129,40 @@ from sqlalchemy import text
 
 try:
     Base.metadata.create_all(bind=engine)
-    if engine.dialect.name != 'sqlite':
-        with engine.connect() as conn:
+    with engine.connect() as conn:
+        if engine.dialect.name != 'sqlite':
             conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS difficulty VARCHAR(20) DEFAULT 'Medium';"))
             conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS topic VARCHAR(50) DEFAULT 'General';"))
             conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS starter_code TEXT;"))
             conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS constraints TEXT;"))
             conn.execute(text("ALTER TABLE question_templates ADD COLUMN IF NOT EXISTS constraints TEXT;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
             conn.commit()
+        else:
+            # SQLite safe column migration
+            for col, col_type in [
+                ("difficulty", "VARCHAR(20) DEFAULT 'Medium'"),
+                ("topic", "VARCHAR(50) DEFAULT 'General'"),
+                ("starter_code", "TEXT"),
+                ("constraints", "TEXT"),
+            ]:
+                try:
+                    conn.execute(text(f"ALTER TABLE questions ADD COLUMN {col} {col_type};"))
+                    conn.commit()
+                except Exception:
+                    pass
+            for col, col_type in [
+                ("hashed_password", "VARCHAR(255)"),
+                ("google_id", "VARCHAR(255)"),
+                ("avatar_url", "VARCHAR(500)")
+            ]:
+                try:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {col_type};"))
+                    conn.commit()
+                except Exception:
+                    pass
 
 
 
@@ -238,6 +265,152 @@ app.add_middleware(
 async def health_check():
     """Simple health check to verify backend reachability."""
     return {"status": "OK"}
+
+
+# ── AUTH ENDPOINTS ────────────────────────────────────────────────────────────
+
+@app.post("/auth/register", response_model=TokenResponse)
+def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user (Instructor or Student) with email + password."""
+    from auth import hash_password, create_access_token
+    from datetime import timedelta
+
+    # Check duplicate email
+    existing = db.query(User).filter(User.email == req.email.strip().lower()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+
+    role_obj = db.query(Role).filter(Role.name == req.role).first()
+    if not role_obj:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {req.role}")
+
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    new_user = User(
+        name=req.name.strip(),
+        email=req.email.strip().lower(),
+        hashed_password=hash_password(req.password),
+        role_id=role_obj.id,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    token = create_access_token(
+        {"sub": new_user.email, "role": req.role},
+        expires_delta=timedelta(hours=24)
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": new_user.id, "name": new_user.name, "email": new_user.email, "role": req.role}
+    }
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(req: LoginRequest, db: Session = Depends(get_db)):
+    """Login with email + password. Returns JWT token."""
+    from auth import verify_password, create_access_token
+    from datetime import timedelta
+
+    user = db.query(User).filter(User.email == req.email.strip().lower()).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="No account found with this email.")
+
+    # Validate role matches
+    if user.role and user.role.name != req.role:
+        raise HTTPException(status_code=403, detail=f"This account is registered as {user.role.name}, not {req.role}.")
+
+    # Password check — allow legacy accounts with no password (name-only auth)
+    if user.hashed_password:
+        if not req.password or not verify_password(req.password, user.hashed_password):
+            raise HTTPException(status_code=401, detail="Incorrect password.")
+    else:
+        # Legacy account: set password on first proper login
+        if req.password:
+            from auth import hash_password
+            user.hashed_password = hash_password(req.password)
+            db.commit()
+
+    token = create_access_token(
+        {"sub": user.email, "role": user.role.name if user.role else req.role},
+        expires_delta=timedelta(hours=24)
+    )
+    role_name = user.role.name if user.role else req.role
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": user.id, "name": user.name, "email": user.email, "role": role_name}
+    }
+
+
+@app.post("/auth/google", response_model=TokenResponse)
+def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """
+    Verify a Google ID token (from Google Sign-In JS library) and log in or register the user.
+    The credential field is the JWT returned by Google's credential response.
+    """
+    from auth import create_access_token
+    from datetime import timedelta
+
+    # Decode the Google JWT without signature verification (we trust Google's public key
+    # validation happens client-side via GSI; for production use google-auth library).
+    # For our dev/mock setup: decode the payload portion only.
+    try:
+        import base64, json as _json
+        parts = req.credential.split(".")
+        if len(parts) != 3:
+            raise ValueError("Not a valid JWT")
+        # Add padding
+        payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+        google_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Google credential token.")
+
+    email = google_payload.get("email", "").lower()
+    name = google_payload.get("name", "") or google_payload.get("email", "")
+    google_id = google_payload.get("sub", "")
+    avatar_url = google_payload.get("picture", "")
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Could not extract email from Google token.")
+
+    role_obj = db.query(Role).filter(Role.name == req.role).first()
+    if not role_obj:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {req.role}")
+
+    # Find or create user
+    user = db.query(User).filter(User.email == email).first()
+    if user:
+        # Update google_id and avatar if missing
+        if not user.google_id:
+            user.google_id = google_id
+        if avatar_url and not user.avatar_url:
+            user.avatar_url = avatar_url
+        db.commit()
+    else:
+        user = User(
+            name=name,
+            email=email,
+            google_id=google_id,
+            avatar_url=avatar_url,
+            role_id=role_obj.id,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    role_name = user.role.name if user.role else req.role
+    token = create_access_token(
+        {"sub": user.email, "role": role_name},
+        expires_delta=timedelta(hours=24)
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": user.id, "name": user.name, "email": user.email, "role": role_name}
+    }
 
 
 
