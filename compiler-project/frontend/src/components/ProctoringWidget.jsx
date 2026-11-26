@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ProctoringWidget.css';
 
 export default function ProctoringWidget({
@@ -16,11 +16,13 @@ export default function ProctoringWidget({
   const [activeAlert, setActiveAlert] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState(null);
-  const [proxyStatus, setProxyStatus] = useState('STANDBY'); // STANDBY, VERIFIED_SINGLE_FACE, NO_FACE, MULTIPLE_FACES, LOOKING_AWAY, CAMERA_OCCLUDED
+  const [proxyStatus, setProxyStatus] = useState('STANDBY');
   const [faceCount, setFaceCount] = useState(0);
   const [isWidgetCollapsed, setIsWidgetCollapsed] = useState(false);
   const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
   const [violationsHistory, setViolationsHistory] = useState([]);
+  // Adaptive frame rate: slow down when no violations, speed up after a flag
+  const [frameInterval, setFrameInterval] = useState(2500);
 
   const wsRef = useRef(null);
   const videoRef = useRef(null);
@@ -28,6 +30,8 @@ export default function ProctoringWidget({
   const streamRef = useRef(null);
   const frameIntervalRef = useRef(null);
   const alertTimeoutRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
 
   // Determine WebSocket URL
   const getWsUrl = () => {
@@ -38,7 +42,7 @@ export default function ProctoringWidget({
   };
 
   // Helper to send telemetry safely
-  const sendTelemetry = (type, details = {}, image = null) => {
+  const sendTelemetry = useCallback((type, details = {}, image = null) => {
     if (isExamFinished) return;
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -50,7 +54,7 @@ export default function ProctoringWidget({
         timestamp: Date.now()
       }));
     }
-  };
+  }, [isExamFinished, testId, studentName]);
 
   // Display toast alert for violations
   const triggerAlert = (data) => {
@@ -61,27 +65,23 @@ export default function ProctoringWidget({
     }, 4500);
   };
 
-  // 1. Initialize WebSocket Connection
-  useEffect(() => {
+  // ── WebSocket with exponential-backoff auto-reconnect ──────────────────────
+  const connectWebSocket = useCallback(() => {
     if (isExamFinished) return;
-
     const wsUrl = getWsUrl();
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setIsConnected(true);
+      reconnectAttemptsRef.current = 0; // reset on success
       console.log('[Proctoring Agent] WebSocket connected.');
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-
-        if (data.status === 'CONNECTED') {
-          // Handshake acknowledged
-          return;
-        }
+        if (data.status === 'CONNECTED' || data.status === 'PONG') return;
 
         if (data.proxy_status) {
           setProxyStatus(data.proxy_status);
@@ -104,6 +104,11 @@ export default function ProctoringWidget({
             },
             ...prev
           ]);
+          // Speed up frame capture after a flag for 30 seconds
+          if (data.status === 'HARD_FLAG' || data.status === 'SOFT_WARNING') {
+            setFrameInterval(1200);
+            setTimeout(() => setFrameInterval(2500), 30000);
+          }
         }
 
         // Handle warnings and penalties
@@ -123,30 +128,40 @@ export default function ProctoringWidget({
       }
     };
 
-    ws.onerror = (err) => {
-      console.warn('[Proctoring Agent] WebSocket error:', err);
-      setIsConnected(false);
-    };
+    ws.onerror = () => setIsConnected(false);
 
     ws.onclose = () => {
       setIsConnected(false);
-      console.log('[Proctoring Agent] WebSocket closed.');
+      if (isExamFinished) return;
+      // Exponential backoff: 2s, 4s, 8s, 16s, max 30s
+      const delay = Math.min(2000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+      reconnectAttemptsRef.current += 1;
+      console.log(`[Proctoring Agent] Reconnecting in ${delay / 1000}s (attempt ${reconnectAttemptsRef.current})…`);
+      reconnectTimerRef.current = setTimeout(connectWebSocket, delay);
     };
+  }, [isExamFinished, testId, studentName]);
 
-    // Heartbeat every 20s
+  // 1. Initialize WebSocket Connection
+  useEffect(() => {
+    if (isExamFinished) return;
+    connectWebSocket();
+
+    // Heartbeat every 20s (kept separate so it uses fresh ws ref)
     const heartbeat = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now() }));
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now() }));
       }
     }, 20000);
 
     return () => {
       clearInterval(heartbeat);
-      if (ws.readyState === WebSocket.OPEN) ws.close();
+      clearTimeout(reconnectTimerRef.current);
+      if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close();
     };
-  }, [testId, studentName, isExamFinished]);
+  }, [testId, studentName, isExamFinished, connectWebSocket]);
 
-  // 2. Set up DOM Event Listeners for Tab Switch, Defocus, Paste, and Multi-Display
+  // 2. Set up DOM Event Listeners for Tab Switch, Defocus, Paste, Multi-Display,
+  //    Right-click, and DevTools keyboard shortcuts
   useEffect(() => {
     if (isExamFinished) return;
 
@@ -210,9 +225,48 @@ export default function ProctoringWidget({
       }
     };
 
+    // E. Right-click context menu suppression + logging
+    const handleContextMenu = (e) => {
+      e.preventDefault();
+      sendTelemetry('RIGHT_CLICK', {
+        description: 'Candidate attempted to open context menu (right-click).',
+        x: e.clientX,
+        y: e.clientY
+      });
+    };
+
+    // F. DevTools / view-source keyboard shortcuts detection
+    const handleKeyDown = (e) => {
+      const isDevTools =
+        e.key === 'F12' ||
+        (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'K'].includes(e.key.toUpperCase())) ||
+        (e.ctrlKey && e.key.toUpperCase() === 'U') ||  // View Source
+        (e.metaKey && e.altKey && e.key.toUpperCase() === 'I'); // Mac DevTools
+
+      if (isDevTools) {
+        e.preventDefault();
+        sendTelemetry('DEVTOOLS_ATTEMPT', {
+          key: e.key,
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey,
+          meta: e.metaKey,
+          description: `Developer tools keyboard shortcut detected: ${e.key}`
+        });
+      }
+
+      // Print screen attempt
+      if (e.key === 'PrintScreen') {
+        sendTelemetry('SCREENSHOT_ATTEMPT', {
+          description: 'Print Screen key pressed during assessment.'
+        });
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleWindowBlur);
     document.addEventListener('paste', handlePaste, true);
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown, true);
 
     // Initial multi-display check and periodic listener
     checkMultiDisplay();
@@ -222,9 +276,11 @@ export default function ProctoringWidget({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('paste', handlePaste, true);
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown, true);
       clearInterval(multiDisplayInterval);
     };
-  }, [isExamFinished]);
+  }, [isExamFinished, sendTelemetry]);
 
   // 3. Camera Option & Periodic Proxy Analysis Loop
   const startCamera = async () => {
