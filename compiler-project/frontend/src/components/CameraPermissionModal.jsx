@@ -21,7 +21,7 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
   const checkIntervalRef = useRef(null);
   const isCheckingRef = useRef(false);
 
-  // Stop media tracks helper
+  // Stop media tracks helper - only when explicitly needed or on unmount
   const stopAllTracks = () => {
     if (checkIntervalRef.current) {
       clearInterval(checkIntervalRef.current);
@@ -31,23 +31,33 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
   };
 
-  // Assign stream to video element
+  // Cleanup ONLY on unmount of modal
   useEffect(() => {
-    if (stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-    }
     return () => {
       stopAllTracks();
     };
+  }, []);
+
+  // Guarantee video element receives stream and plays
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+      }
+      videoRef.current.play().catch(e => console.warn('[CamPerm] Play exception:', e));
+    }
   }, [stream]);
 
   // Real face check against backend API
   const performFaceCheck = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current || isCheckingRef.current) return;
     const video = videoRef.current;
-    if (!video.videoWidth || !video.videoHeight) return;
+    if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return;
 
     try {
       isCheckingRef.current = true;
@@ -58,7 +68,9 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
       ctx.drawImage(video, 0, 0, 320, 240);
       const imageBase64 = canvas.toDataURL('image/jpeg', 0.65);
 
-      const res = await fetch('http://127.0.0.1:8000/proctoring/check-face', {
+      const host = window.location.hostname || '127.0.0.1';
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const res = await fetch(`${protocol}//${host}:8000/proctoring/check-face`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageBase64 })
@@ -70,7 +82,7 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
 
       const data = await res.json();
 
-      if (data.face_detected && data.face_count === 1) {
+      if (data.face_detected) {
         setFaceState({
           status: 'verified',
           message: 'Face verified — single candidate in frame.',
@@ -106,52 +118,69 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
     setError(null);
     setCameraStatus('requesting');
     setAudioStatus('requesting');
-    setFaceState({ status: 'checking', message: 'Detecting candidate face…', faceCount: 0 });
+    setFaceState({ status: 'checking', message: 'Starting camera…', faceCount: 0 });
 
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: 'user' },
-        audio: true,
-      });
-      streamRef.current = mediaStream;
+      let mediaStream = null;
+      let micGranted = false;
 
+      // 1. Try requesting both camera and audio
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240, facingMode: 'user' },
+          audio: true,
+        });
+        micGranted = mediaStream.getAudioTracks().length > 0;
+      } catch (bothErr) {
+        console.warn('[CamPerm] Both video+audio request failed, falling back to video only:', bothErr);
+        // 2. If mic failed or not present, fallback to video-only so proctoring can still work
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240, facingMode: 'user' },
+          audio: false,
+        });
+        micGranted = false;
+      }
+
+      streamRef.current = mediaStream;
       const hasVideo = mediaStream.getVideoTracks().length > 0;
-      const hasAudio = mediaStream.getAudioTracks().length > 0;
 
       setCameraStatus(hasVideo ? 'granted' : 'denied');
-      setAudioStatus(hasAudio ? 'granted' : 'denied');
+      setAudioStatus(micGranted ? 'granted' : 'denied');
       setStream(mediaStream);
 
-      // Start periodic real face checks every 1.5 seconds once video is playing
+      // Start periodic real face checks every 1.5 seconds
       if (hasVideo) {
         if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
-        // Initial delay for webcam to warm up
+        // Check after initial frame renders
         setTimeout(() => {
           performFaceCheck();
           checkIntervalRef.current = setInterval(performFaceCheck, 1500);
-        }, 800);
+        }, 600);
       }
     } catch (err) {
+      console.error('[CamPerm] Camera access failed:', err);
       const isDenied = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError';
       setCameraStatus('denied');
       setAudioStatus('denied');
       setFaceState({ status: 'error', message: 'Camera permission denied.', faceCount: 0 });
       setError(
         isDenied
-          ? 'Camera and microphone access was denied. Please allow permissions in your browser address bar and try again.'
+          ? 'Camera access was denied. Please click the camera icon in your browser address bar to Allow access, then click Retry.'
           : `Could not access media devices: ${err.message}`
       );
     }
   };
 
   const handleProceed = () => {
-    if (!bothGranted || faceState.status !== 'verified') return;
+    if (cameraStatus !== 'granted' || faceState.status !== 'verified') return;
     stopAllTracks();
-    onPermissionsGranted();
+    // Allow short 300ms window for browser camera hardware release
+    setTimeout(() => {
+      onPermissionsGranted();
+    }, 300);
   };
 
-  const bothGranted = cameraStatus === 'granted' && audioStatus === 'granted';
-  const anyDenied = cameraStatus === 'denied' || audioStatus === 'denied';
+  const isCameraReady = cameraStatus === 'granted';
   const isFaceVerified = faceState.status === 'verified';
 
   return (
@@ -171,51 +200,60 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
           </div>
         </div>
 
-        {/* Video preview container */}
+        {/* Video preview container - Video is always in DOM to avoid race conditions */}
         <div className="cam-perm-preview-area">
-          {stream ? (
-            <div className="cam-perm-video-wrap">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="cam-perm-video"
-                onLoadedMetadata={() => performFaceCheck()}
-              />
+          <div
+            className="cam-perm-video-wrap"
+            style={{ display: stream ? 'flex' : 'none' }}
+          >
+            <video
+              ref={(el) => {
+                videoRef.current = el;
+                if (el && stream && el.srcObject !== stream) {
+                  el.srcObject = stream;
+                  el.play().catch(() => {});
+                }
+              }}
+              autoPlay
+              playsInline
+              muted
+              className="cam-perm-video"
+              onLoadedMetadata={() => performFaceCheck()}
+            />
 
-              {/* Dynamic live status badge on the video */}
-              {faceState.status === 'checking' && (
-                <div className="cam-perm-face-badge checking">
-                  <span className="spinner-dot"></span> Scanning for face…
-                </div>
-              )}
-              {faceState.status === 'verified' && (
-                <div className="cam-perm-face-badge verified">
-                  ✅ Face Verified (1 candidate)
-                </div>
-              )}
-              {faceState.status === 'no_face' && (
-                <div className="cam-perm-face-badge warning">
-                  ⚠️ No face detected in frame
-                </div>
-              )}
-              {faceState.status === 'multiple' && (
-                <div className="cam-perm-face-badge danger">
-                  🚨 Multiple faces detected ({faceState.faceCount})
-                </div>
-              )}
-              {faceState.status === 'occluded' && (
-                <div className="cam-perm-face-badge danger">
-                  🚫 Camera occluded or dark
-                </div>
-              )}
-            </div>
-          ) : (
+            {/* Dynamic live status badge on the video */}
+            {faceState.status === 'checking' && (
+              <div className="cam-perm-face-badge checking">
+                <span className="spinner-dot"></span> Scanning for face…
+              </div>
+            )}
+            {faceState.status === 'verified' && (
+              <div className="cam-perm-face-badge verified">
+                ✅ Face Verified (1 candidate)
+              </div>
+            )}
+            {faceState.status === 'no_face' && (
+              <div className="cam-perm-face-badge warning">
+                ⚠️ No face detected in frame
+              </div>
+            )}
+            {faceState.status === 'multiple' && (
+              <div className="cam-perm-face-badge danger">
+                🚨 Multiple faces detected ({faceState.faceCount})
+              </div>
+            )}
+            {faceState.status === 'occluded' && (
+              <div className="cam-perm-face-badge danger">
+                🚫 Camera occluded or dark
+              </div>
+            )}
+          </div>
+
+          {!stream && (
             <div className="cam-perm-placeholder">
               <div className="cam-perm-placeholder-icon">📹</div>
               <p className="placeholder-primary">
-                {cameraStatus === 'idle' ? 'Camera feed will appear here' : 'Initializing camera stream…'}
+                {cameraStatus === 'requesting' ? 'Initializing camera stream…' : 'Camera feed will appear here'}
               </p>
               <p className="placeholder-sub">Click the button below to allow camera &amp; mic access</p>
             </div>
@@ -243,15 +281,15 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
           {/* Microphone row */}
           <div className={`cam-perm-status-item ${audioStatus === 'granted' ? 'item-granted' : audioStatus === 'denied' ? 'item-denied' : ''}`}>
             <span className="perm-status-icon">
-              {audioStatus === 'granted' ? '✅' : audioStatus === 'denied' ? '❌' : audioStatus === 'requesting' ? '⏳' : '○'}
+              {audioStatus === 'granted' ? '✅' : audioStatus === 'denied' ? 'ℹ️' : audioStatus === 'requesting' ? '⏳' : '○'}
             </span>
             <div className="cam-perm-status-text">
               <span className="cam-perm-status-label">Microphone Permission</span>
               <span className="cam-perm-status-desc">
                 {audioStatus === 'idle' && 'Waiting to request microphone access'}
                 {audioStatus === 'requesting' && 'Requesting browser microphone permission…'}
-                {audioStatus === 'granted' && 'Microphone input stream ready'}
-                {audioStatus === 'denied' && 'Access blocked'}
+                {audioStatus === 'granted' && 'Microphone connected'}
+                {audioStatus === 'denied' && 'Microphone optional or not detected'}
               </span>
             </div>
           </div>
@@ -288,7 +326,7 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
         {/* Helper tip */}
         {cameraStatus === 'idle' && (
           <div className="cam-perm-tips">
-            💡 When prompted by your browser, click <strong>"Allow"</strong> for camera and microphone access.
+            💡 When prompted by your browser, click <strong>"Allow"</strong> for camera access.
           </div>
         )}
 
@@ -298,13 +336,13 @@ export default function CameraPermissionModal({ onPermissionsGranted, onBack }) 
             ← Back to Rules
           </button>
 
-          {!bothGranted ? (
+          {!isCameraReady ? (
             <button
               className="cam-perm-btn-request"
               onClick={requestPermissions}
               disabled={cameraStatus === 'requesting'}
             >
-              {cameraStatus === 'idle' ? '🎥 Allow Camera & Audio' : anyDenied ? '🔄 Retry Permissions' : '⏳ Requesting…'}
+              {cameraStatus === 'idle' ? '🎥 Allow Camera & Audio' : cameraStatus === 'denied' ? '🔄 Retry Camera Access' : '⏳ Requesting…'}
             </button>
           ) : isFaceVerified ? (
             <button className="cam-perm-btn-proceed verified" onClick={handleProceed}>

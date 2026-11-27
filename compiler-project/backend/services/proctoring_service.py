@@ -36,7 +36,7 @@ def get_face_detector():
                     YUNET_MODEL_PATH,
                     "",
                     (320, 320),
-                    score_threshold=0.6,
+                    score_threshold=0.45,
                     nms_threshold=0.3,
                     top_k=5000
                 )

@@ -15,6 +15,7 @@ export default function ProctoringWidget({
   const [totalViolations, setTotalViolations] = useState(0);
   const [activeAlert, setActiveAlert] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [proxyStatus, setProxyStatus] = useState('STANDBY');
   const [faceCount, setFaceCount] = useState(0);
@@ -283,24 +284,35 @@ export default function ProctoringWidget({
   }, [isExamFinished, sendTelemetry]);
 
   // 3. Camera Option & Periodic Proxy Analysis Loop
-  const startCamera = async () => {
+  const startCamera = async (retries = 3) => {
     setCameraError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: 'user' },
-        audio: false
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240, facingMode: 'user' },
+          audio: false
+        });
+        streamRef.current = stream;
+        setCameraStream(stream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+        setIsCameraActive(true);
+        setProxyStatus('STANDBY');
+        return;
+      } catch (err) {
+        console.warn(`[Proctoring Agent] Camera attempt ${attempt} error:`, err);
+        if (attempt < retries) {
+          // Wait 600ms for camera device to be released by any prior component
+          await new Promise(r => setTimeout(r, 600));
+        } else {
+          console.error('[Proctoring Agent] Camera access failed after retries:', err);
+          setCameraError(err.message || 'Camera access denied or device in use.');
+          setIsCameraActive(false);
+          setProxyStatus('CAMERA_DISABLED');
+        }
       }
-      setIsCameraActive(true);
-      setProxyStatus('STANDBY');
-    } catch (err) {
-      console.error('[Proctoring Agent] Camera access denied or unavailable:', err);
-      setCameraError('Camera access denied or device not found.');
-      setIsCameraActive(false);
-      setProxyStatus('CAMERA_DISABLED');
     }
   };
 
@@ -309,6 +321,7 @@ export default function ProctoringWidget({
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    setCameraStream(null);
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -322,9 +335,19 @@ export default function ProctoringWidget({
 
   // Start camera on mount by default for proctoring
   useEffect(() => {
-    startCamera();
+    startCamera(3);
     return () => stopCamera();
   }, []);
+
+  // Guarantee video element srcObject is synced
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      if (videoRef.current.srcObject !== cameraStream) {
+        videoRef.current.srcObject = cameraStream;
+      }
+      videoRef.current.play().catch(e => console.warn('Video play error:', e));
+    }
+  }, [cameraStream, isCameraActive]);
 
   // Frame capture loop for proxy & face detection (every 2.5 seconds)
   useEffect(() => {
@@ -420,27 +443,34 @@ export default function ProctoringWidget({
         {!isWidgetCollapsed && (
           <div className="pip-body">
             <div className="pip-video-wrapper">
-              {isCameraActive ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="pip-video-feed"
-                />
-              ) : (
+              <video
+                ref={(el) => {
+                  videoRef.current = el;
+                  if (el && cameraStream && el.srcObject !== cameraStream) {
+                    el.srcObject = cameraStream;
+                    el.play().catch(() => {});
+                  }
+                }}
+                autoPlay
+                playsInline
+                muted
+                className="pip-video-feed"
+                style={{ display: isCameraActive ? 'block' : 'none' }}
+              />
+
+              {!isCameraActive && (
                 <div className="pip-camera-placeholder">
                   {cameraError ? (
                     <div className="camera-err-msg">
                       <span>📷</span>
                       <p>{cameraError}</p>
-                      <button className="camera-retry-btn" onClick={startCamera}>Retry Camera</button>
+                      <button className="camera-retry-btn" onClick={() => startCamera(3)}>Retry Camera</button>
                     </div>
                   ) : (
                     <div className="camera-off-msg">
                       <span>📷</span>
                       <p>Camera is disabled.</p>
-                      <button className="camera-retry-btn" onClick={startCamera}>Enable Camera</button>
+                      <button className="camera-retry-btn" onClick={() => startCamera(3)}>Enable Camera</button>
                     </div>
                   )}
                 </div>

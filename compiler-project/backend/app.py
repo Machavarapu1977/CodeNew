@@ -1251,8 +1251,10 @@ def check_face_endpoint(req: CheckFaceRequest):
     face_count = result.get("face_count", 0)
     proxy_status = result.get("proxy_status", "NO_FACE")
     is_violation = result.get("is_violation", False)
+    # A candidate face is present if exactly 1 face is visible and not occluded or multiple
+    is_face_confirmed = (face_count == 1 and proxy_status in ("VERIFIED_SINGLE_FACE", "LOOKING_AWAY", "VERIFIED_ACTIVE"))
     return {
-        "face_detected": face_count == 1 and not is_violation,
+        "face_detected": is_face_confirmed,
         "face_count": face_count,
         "proxy_status": proxy_status,
         "message": result.get("message", ""),
