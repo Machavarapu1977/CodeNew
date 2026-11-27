@@ -295,7 +295,7 @@ export default function ProctoringWidget({
         videoRef.current.srcObject = stream;
       }
       setIsCameraActive(true);
-      setProxyStatus('VERIFIED_SINGLE_FACE');
+      setProxyStatus('STANDBY');
     } catch (err) {
       console.error('[Proctoring Agent] Camera access denied or unavailable:', err);
       setCameraError('Camera access denied or device not found.');

@@ -111,8 +111,8 @@ body {
 
 .progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #007bff, #0056b3);
-  border-radius: 3px;
+  background: linear-gradient(90deg, #a78bfa, #7c3aed);
+  border-radius: 999px;
   transition: width 0.3s ease;
 }
 
@@ -120,13 +120,13 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background-color: #f1f5f9;
+  background-color: #f8fafc;
   color: #0f172a;
-  border: 1px solid #cbd5e1;
-  padding: 4px 10px;
-  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  padding: 5px 12px;
+  border-radius: 20px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   font-family: 'Fira Code', ui-monospace, Consolas, monospace;
   transition: all 0.3s ease;
 }
@@ -135,14 +135,14 @@ body {
 .proctor-shield-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  background: rgba(37, 99, 235, 0.15);
-  color: #60a5fa;
-  border: 1px solid rgba(37, 99, 235, 0.3);
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  gap: 6px;
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
   letter-spacing: 0.02em;
 }
 
@@ -947,22 +947,31 @@ body {
 }
 
 /* ==========================================
-   LeetCode Style Student Coding Interface
+   Standard Layout Student Coding Interface (LoginPage Theme)
    ========================================== */
 
 .student-page {
-  background-color: #f7f7f8;
+  background-color: #f3f5fa;
   height: 100vh;
   overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.student-page .header {
+  background-color: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  height: 64px;
+  padding: 0 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .main-layout.student-mode {
   display: grid !important;
   grid-template-columns: 1fr 1fr !important;
-  gap: 10px !important;
-  padding: 10px !important;
-  height: calc(100vh - 60px) !important;
-  background-color: #f7f7f8 !important;
+  gap: 16px !important;
+  padding: 14px 20px !important;
+  height: calc(100vh - 64px) !important;
+  background-color: #f3f5fa !important;
   box-sizing: border-box !important;
   overflow: hidden !important;
 }
@@ -972,10 +981,10 @@ body {
   display: flex;
   flex-direction: column;
   background-color: #ffffff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
   height: 100%;
 }
 
@@ -983,10 +992,10 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #f8f9fa;
-  border-bottom: 1px solid #eaeaea;
-  padding: 0 12px;
-  height: 40px;
+  background-color: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 16px;
+  height: 42px;
   flex-shrink: 0;
 }
 
@@ -1002,20 +1011,20 @@ body {
   padding: 8px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #666;
+  color: #64748b;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.2s ease;
 }
 
 .panel-tab-btn:hover {
-  color: #111;
+  color: #0f172a;
 }
 
 .panel-tab-btn.active {
-  color: #111;
-  font-weight: 600;
-  border-bottom-color: #111;
+  color: #6d28d9;
+  font-weight: 700;
+  border-bottom-color: #6d28d9;
 }
 
 .tab-icon-btn {
@@ -1026,7 +1035,7 @@ body {
 
 .problem-content-scroll {
   flex: 1;
-  padding: 20px;
+  padding: 24px;
   overflow-y: auto;
 }
 
@@ -1034,13 +1043,14 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-bottom: 16px;
-  font-size: 12px;
-  color: #1e40af;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  padding: 10px 16px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: #5b21b6;
+  font-weight: 500;
 }
 
 .question-select-wrapper {
@@ -1226,11 +1236,11 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
   overflow: hidden;
   background-color: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
 }
 
 .leetcode-editor-container {
@@ -1246,10 +1256,10 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #252526;
-  padding: 6px 14px;
-  border-bottom: 1px solid #333;
-  height: 38px;
+  background-color: #1e293b;
+  padding: 6px 16px;
+  border-bottom: 1px solid #334155;
+  height: 40px;
 }
 
 .editor-left-tools {
@@ -1260,17 +1270,18 @@ body {
 
 .code-symbol {
   color: #38bdf8;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 13px;
 }
 
 .leetcode-lang-select {
-  background-color: #333333;
+  background-color: #0f172a;
   color: #ffffff;
-  border: 1px solid #444;
-  border-radius: 4px;
-  padding: 3px 8px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 4px 10px;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .auto-badge {
@@ -1309,11 +1320,11 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #1f1f1f;
-  color: #888888;
-  padding: 4px 14px;
+  background-color: #0f172a;
+  color: #94a3b8;
+  padding: 4px 16px;
   font-size: 11px;
-  border-top: 1px solid #2d2d2d;
+  border-top: 1px solid #1e293b;
 }
 
 /* Bottom Controls Action Bar */
@@ -1321,42 +1332,43 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #f8f9fa;
-  border-top: 1px solid #e5e7eb;
-  padding: 8px 16px;
-  height: 48px;
+  background-color: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  padding: 10px 18px;
+  height: 54px;
   flex-shrink: 0;
 }
 
 .console-toggle-btn {
-  background-color: #ffffff;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 6px 14px;
+  background-color: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 7px 16px;
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: #334155;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .console-toggle-btn:hover {
-  background-color: #f3f4f6;
-  border-color: #9ca3af;
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
 }
 
 .action-buttons-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .leetcode-action-bar .run-btn {
-  background-color: #e5e7eb;
-  color: #1f2937;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 6px 18px;
+  background-color: #f1f5f9;
+  color: #1e293b;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px 20px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -1364,19 +1376,27 @@ body {
 }
 
 .leetcode-action-bar .run-btn:hover:not(:disabled) {
-  background-color: #d1d5db;
+  background-color: #e2e8f0;
+  border-color: #cbd5e1;
 }
 
 .leetcode-action-bar .submit-btn {
-  background-color: #007bff;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
   color: #ffffff;
   border: none;
-  border-radius: 6px;
-  padding: 6px 20px;
+  border-radius: 10px;
+  padding: 8px 24px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgba(109, 40, 217, 0.28);
   transition: all 0.15s ease;
+}
+
+.leetcode-action-bar .submit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6d28d9, #5b21b6);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(109, 40, 217, 0.35);
 }
 
 .leetcode-action-bar .submit-btn:hover:not(:disabled) {
@@ -1551,20 +1571,22 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 20px;
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.1s ease;
+  transition: all 0.15s ease;
   white-space: nowrap;
 }
 
 .student-test-btn:hover {
-  background: #1d4ed8;
+  background: #ede9fe;
+  color: #6d28d9;
+  border-color: #ddd6fe;
   transform: translateY(-1px);
 }
 
@@ -1593,8 +1615,8 @@ body {
 }
 
 .student-modal-tab-btn.active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: #6d28d9;
+  border-bottom-color: #6d28d9;
 }
 
 .student-filter-row {
@@ -1635,28 +1657,30 @@ body {
   background: #f0fdf4;
   color: #15803d;
   border: 1px solid #bbf7d0;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
 
 .finish-exam-btn {
-  background-color: #007bff;
+  background: linear-gradient(135deg, #10b981, #059669);
   color: #ffffff;
-  border: 1px solid #007bff;
-  padding: 4px 14px;
-  border-radius: 8px;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 20px;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
   transition: all 0.15s ease;
 }
 
 .finish-exam-btn:hover {
-  background-color: #0056b3;
-  border-color: #0056b3;
+  background: linear-gradient(135deg, #059669, #047857);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+  transform: translateY(-1px);
 }
 
 /* ── Problem Title with Solved Badge ── */

@@ -1,126 +1,283 @@
-/* ── Camera Permission Modal ── */
+/* ── Camera & Hardware Setup Modal (LoginPage Standard Theme) ── */
 .cam-perm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.88);
-  backdrop-filter: blur(6px);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9100;
   padding: 20px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  box-sizing: border-box;
 }
 
 .cam-perm-modal {
-  background: #0f172a;
-  border: 1.5px solid rgba(255,255,255,0.1);
-  border-radius: 20px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 24px;
   width: 100%;
-  max-width: 520px;
-  padding: 32px;
+  max-width: 540px;
+  padding: 2rem 2.25rem;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+  gap: 1.5rem;
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.2), 0 10px 20px -5px rgba(15, 23, 42, 0.08);
+  box-sizing: border-box;
+  animation: modalAppear 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalAppear {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 /* Header */
-.cam-perm-header { display: flex; align-items: center; gap: 16px; }
-.cam-perm-header-icon { font-size: 2.2rem; flex-shrink: 0; }
-.cam-perm-title { font-size: 1.35rem; font-weight: 800; color: #f1f5f9; margin: 0 0 4px; }
-.cam-perm-sub  { color: #64748b; font-size: 0.85rem; margin: 0; }
+.cam-perm-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cam-perm-header-badge {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cam-perm-badge-icon {
+  font-size: 1.4rem;
+}
+
+.cam-perm-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0 0 3px 0;
+  letter-spacing: -0.02em;
+}
+
+.cam-perm-sub {
+  color: #64748b;
+  font-size: 0.88rem;
+  margin: 0;
+  line-height: 1.4;
+}
 
 /* Video preview */
 .cam-perm-preview-area {
-  border-radius: 14px;
+  border-radius: 18px;
   overflow: hidden;
-  background: #0d1526;
-  border: 1.5px solid rgba(255,255,255,0.08);
-  min-height: 180px;
+  background: #0f172a;
+  border: 1.5px solid #e2e8f0;
+  min-height: 210px;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.12);
 }
-.cam-perm-video-wrap { width: 100%; position: relative; }
-.cam-perm-video { width: 100%; display: block; transform: scaleX(-1); border-radius: 12px; }
-.cam-perm-face-check,
-.cam-perm-face-ok {
+
+.cam-perm-video-wrap {
+  width: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cam-perm-video {
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  display: block;
+  transform: scaleX(-1);
+}
+
+/* Dynamic Live Status Badge on Video */
+.cam-perm-face-badge {
   position: absolute;
-  bottom: 10px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0,0,0,0.75);
-  color: #fbbf24;
-  font-size: 0.8rem;
-  padding: 5px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 16px;
   border-radius: 20px;
   white-space: nowrap;
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  animation: badgePop 0.2s ease-out;
 }
-.cam-perm-face-ok { color: #4ade80; }
+
+@keyframes badgePop {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.cam-perm-face-badge.checking {
+  background: rgba(30, 41, 59, 0.88);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.cam-perm-face-badge.verified {
+  background: rgba(6, 78, 59, 0.9);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+
+.cam-perm-face-badge.warning {
+  background: rgba(120, 53, 15, 0.9);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.cam-perm-face-badge.danger {
+  background: rgba(127, 29, 29, 0.92);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.spinner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fbbf24;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* Placeholder */
 .cam-perm-placeholder {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  color: #334155;
-  padding: 32px;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 20px;
+  text-align: center;
+  background: #f8fafc;
+  width: 100%;
 }
-.cam-perm-placeholder-icon { font-size: 2.5rem; opacity: 0.4; }
-.cam-perm-placeholder p { font-size: 0.85rem; margin: 0; }
 
-/* Status list */
-.cam-perm-status-list { display: flex; flex-direction: column; gap: 10px; }
+.cam-perm-placeholder-icon {
+  font-size: 2.2rem;
+  opacity: 0.6;
+}
+
+.placeholder-primary {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #334155;
+  margin: 0;
+}
+
+.placeholder-sub {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* Permission Status List */
+.cam-perm-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .cam-perm-status-item {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.07);
-  transition: border-color 0.2s;
+  align-items: flex-start;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  transition: all 0.2s ease;
 }
-.cam-perm-status-item.item-granted { border-color: rgba(16,185,129,0.3); background: rgba(16,185,129,0.06); }
-.cam-perm-status-item.item-denied  { border-color: rgba(239,68,68,0.3);  background: rgba(239,68,68,0.06);  }
-.perm-status-icon { font-size: 1.3rem; width: 28px; text-align: center; flex-shrink: 0; }
-.perm-idle        { color: #334155; font-size: 1rem; }
-.perm-requesting  { animation: spin 1s linear infinite; display: inline-block; }
-.perm-granted     { }
-.perm-denied      { }
-@keyframes spin { to { transform: rotate(360deg); } }
-.cam-perm-status-text { display: flex; flex-direction: column; gap: 2px; }
-.cam-perm-status-label { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; }
-.cam-perm-status-desc  { font-size: 0.78rem; color: #64748b; }
+
+.cam-perm-status-item.item-granted {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.cam-perm-status-item.item-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.cam-perm-status-item.item-denied {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.perm-status-icon {
+  font-size: 1.1rem;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.cam-perm-status-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cam-perm-status-label {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.cam-perm-status-desc {
+  font-size: 0.8rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+/* Error banner */
+.cam-perm-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.84rem;
+  color: #991b1b;
+  line-height: 1.4;
+}
+
+.error-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
 
 /* Tips */
 .cam-perm-tips {
-  background: rgba(59,130,246,0.08);
-  border: 1px solid rgba(59,130,246,0.2);
-  border-radius: 10px;
-  padding: 12px 16px;
-  font-size: 0.83rem;
-  color: #93c5fd;
-  line-height: 1.5;
-}
-.cam-perm-tips p { margin: 0; }
-
-/* Error */
-.cam-perm-error {
-  background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.3);
-  border-radius: 10px;
-  padding: 12px 16px;
-  font-size: 0.83rem;
-  color: #fca5a5;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.cam-perm-error-hint {
-  font-size: 0.78rem;
-  color: #94a3b8;
-  line-height: 1.5;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: #5b21b6;
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 /* Actions */
@@ -129,48 +286,79 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  margin-top: 4px;
 }
+
 .cam-perm-btn-back {
-  background: none;
-  border: 1.5px solid rgba(255,255,255,0.1);
-  border-radius: 10px;
-  padding: 11px 20px;
+  background: transparent;
+  border: 1.5px solid #e2e8f0;
   color: #64748b;
+  padding: 10px 18px;
+  border-radius: 12px;
   font-size: 0.88rem;
+  font-weight: 600;
   cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
 }
-.cam-perm-btn-back:hover { border-color: rgba(255,255,255,0.2); color: #94a3b8; }
+
+.cam-perm-btn-back:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
 
 .cam-perm-btn-request {
-  flex: 1;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  color: #ffffff;
   border: none;
-  border-radius: 10px;
-  padding: 12px 20px;
-  color: #fff;
+  border-radius: 12px;
+  padding: 11px 22px;
   font-size: 0.92rem;
   font-weight: 700;
   cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(109, 40, 217, 0.28);
+  transition: all 0.2s ease;
+  flex: 1;
 }
-.cam-perm-btn-request:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(59,130,246,0.4); }
-.cam-perm-btn-request:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cam-perm-btn-request:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6d28d9, #5b21b6);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(109, 40, 217, 0.35);
+}
+
+.cam-perm-btn-request:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
 
 .cam-perm-btn-proceed {
-  flex: 1;
-  background: linear-gradient(135deg, #10b981, #059669);
   border: none;
-  border-radius: 10px;
-  padding: 12px 20px;
-  color: #fff;
+  border-radius: 12px;
+  padding: 11px 22px;
   font-size: 0.92rem;
   font-weight: 700;
   cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  flex: 1;
 }
-.cam-perm-btn-proceed:hover { box-shadow: 0 4px 20px rgba(16,185,129,0.4); }
+
+.cam-perm-btn-proceed.verified {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.cam-perm-btn-proceed.verified:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+}
+
+.cam-perm-btn-proceed.disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+  cursor: not-allowed;
+  box-shadow: none;
+}

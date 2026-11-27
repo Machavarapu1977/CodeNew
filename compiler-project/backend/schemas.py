@@ -33,6 +33,9 @@ class GoogleAuthRequest(BaseModel):
     credential: str   # Google ID token (JWT from GSI)
     role: str         # "Instructor" or "Student"
 
+class CheckFaceRequest(BaseModel):
+    image: str
+
 class UserResponse(BaseModel):
     id: int
     name: str

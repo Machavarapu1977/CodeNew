@@ -981,11 +981,11 @@ function App() {
                 style={{
                   fontSize: '0.82rem',
                   fontWeight: 600,
-                  color: '#94a3b8',
-                  background: '#1e293b',
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #334155',
+                  color: '#6d28d9',
+                  background: '#ede9fe',
+                  padding: '5px 12px',
+                  borderRadius: '20px',
+                  border: '1px solid #ddd6fe',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px'

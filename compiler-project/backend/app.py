@@ -9,7 +9,8 @@ from schemas import (
     TokenResponse, UserResponse,
     TemplateResponse, QuestionCreateRequest, QuestionResponse, TestCreateRequest,
     TestResponse, AIGenerateRequest, VectorSearchRequest, PineconeSyncResponse,
-    AutoGenerateTestRequest, ViolationCreate, ViolationResponse, ProctoringStatusResponse
+    AutoGenerateTestRequest, ViolationCreate, ViolationResponse, ProctoringStatusResponse,
+    CheckFaceRequest
 )
 from models import Question, TestCase, Role, User, QuestionTemplate, Test, Violation
 from services.evaluator import evaluate_output
@@ -1165,6 +1166,9 @@ async def proctoring_websocket(
                         severity_override=suggested_sev
                     )
                     result["proxy_analysis"] = analysis
+                    result["proxy_status"] = analysis.get("proxy_status")
+                    result["face_count"] = analysis.get("face_count", 0)
+                    result["message"] = analysis.get("message")
                     await websocket.send_json(result)
                 else:
                     await websocket.send_json({
@@ -1237,5 +1241,23 @@ def log_manual_violation(req: ViolationCreate, db: Session = Depends(get_db)):
         details=details,
         severity_override=req.severity
     )
+
+
+@app.post("/proctoring/check-face")
+def check_face_endpoint(req: CheckFaceRequest):
+    """Endpoint for pre-exam face verification and periodic presence check."""
+    from services.proctoring_service import analyze_camera_frame
+    result = analyze_camera_frame(req.image)
+    face_count = result.get("face_count", 0)
+    proxy_status = result.get("proxy_status", "NO_FACE")
+    is_violation = result.get("is_violation", False)
+    return {
+        "face_detected": face_count == 1 and not is_violation,
+        "face_count": face_count,
+        "proxy_status": proxy_status,
+        "message": result.get("message", ""),
+        "confidence": result.get("confidence", 0.0),
+        "is_violation": is_violation
+    }
 
 
