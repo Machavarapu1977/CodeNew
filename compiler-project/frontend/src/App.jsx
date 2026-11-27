@@ -4,7 +4,7 @@ import './components/InstructorDashboard.css'
 import InstructorDashboard from './components/InstructorDashboard'
 import EvaluationReportModal, { GreenOutlinedTick } from './components/EvaluationReportModal'
 import ProctoringWidget from './components/ProctoringWidget'
-import AuthPage from './components/AuthPage'
+import LoginPage from './components/LoginPage'
 import ProctoringRulesModal from './components/ProctoringRulesModal'
 import CameraPermissionModal from './components/CameraPermissionModal'
 import Editor from '@monaco-editor/react'
@@ -868,9 +868,9 @@ function App() {
     localStorage.removeItem('examEndTime');
   };
 
-  // ── 1. Auth gate: show AuthPage if not logged in ──────────────────────────
+  // ── 1. Auth gate: show LoginPage if not logged in ─────────────────────────
   if (!user || !token) {
-    return <AuthPage onLoginSuccess={handleLoginSuccess} />;
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
   // ── 2. Pre-exam flow for Students: Rules → Camera ─────────────────────────

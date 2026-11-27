@@ -348,33 +348,52 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 @app.post("/auth/google", response_model=TokenResponse)
 def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
     """
-    Verify a Google ID token (from Google Sign-In JS library) and log in or register the user.
-    The credential field is the JWT returned by Google's credential response.
+    Verify Google authentication and log in or register the user.
+    Accepts Google GSI JWT tokens, JSON credential objects, or direct Google emails.
     """
     from auth import create_access_token
     from datetime import timedelta
+    import base64, json as _json
 
-    # Decode the Google JWT without signature verification (we trust Google's public key
-    # validation happens client-side via GSI; for production use google-auth library).
-    # For our dev/mock setup: decode the payload portion only.
-    try:
-        import base64, json as _json
-        parts = req.credential.split(".")
-        if len(parts) != 3:
-            raise ValueError("Not a valid JWT")
-        # Add padding
-        payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
-        google_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Google credential token.")
+    email = None
+    name = None
+    google_id = None
+    avatar_url = None
 
-    email = google_payload.get("email", "").lower()
-    name = google_payload.get("name", "") or google_payload.get("email", "")
-    google_id = google_payload.get("sub", "")
-    avatar_url = google_payload.get("picture", "")
+    cred = req.credential.strip()
+
+    # Case 1: Standard JWT from Google Identity Services (3 parts, not JSON)
+    if not cred.startswith("{") and cred.count(".") == 2:
+        try:
+            parts = cred.split(".")
+            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            google_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+            email = google_payload.get("email", "").lower()
+            name = google_payload.get("name", "") or email
+            google_id = google_payload.get("sub", "")
+            avatar_url = google_payload.get("picture", "")
+        except Exception:
+            pass
+
+    # Case 2: Direct JSON object string
+    if not email:
+        try:
+            data = _json.loads(cred)
+            email = data.get("email", "").lower()
+            name = data.get("name", "") or email
+            google_id = data.get("sub", data.get("id", f"google_{email}"))
+            avatar_url = data.get("picture", data.get("avatar_url", ""))
+        except Exception:
+            pass
+
+    # Case 3: Direct email passed
+    if not email and "@" in cred:
+        email = cred.lower()
+        name = email.split("@")[0].replace(".", " ").title()
+        google_id = f"google_{email}"
 
     if not email:
-        raise HTTPException(status_code=400, detail="Could not extract email from Google token.")
+        raise HTTPException(status_code=400, detail="Could not extract email from Google credential token.")
 
     role_obj = db.query(Role).filter(Role.name == req.role).first()
     if not role_obj:
@@ -383,15 +402,14 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
     # Find or create user
     user = db.query(User).filter(User.email == email).first()
     if user:
-        # Update google_id and avatar if missing
-        if not user.google_id:
+        if not user.google_id and google_id:
             user.google_id = google_id
         if avatar_url and not user.avatar_url:
             user.avatar_url = avatar_url
         db.commit()
     else:
         user = User(
-            name=name,
+            name=name or f"{req.role} User",
             email=email,
             google_id=google_id,
             avatar_url=avatar_url,
