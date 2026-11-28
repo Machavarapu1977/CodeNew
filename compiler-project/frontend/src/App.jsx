@@ -48,8 +48,7 @@ function App() {
       setPreExamStep('idle');
     } else {
       setStudentName(simplifiedUser.name);
-      const verified = sessionStorage.getItem('proctoringVerified');
-      setPreExamStep(verified ? 'ready' : 'rules');
+      setPreExamStep('ready');
     }
   };
 
@@ -152,8 +151,7 @@ function App() {
       const savedUser = localStorage.getItem('user');
       const parsed = savedUser ? JSON.parse(savedUser) : null;
       if (parsed && parsed.role === 'Student') {
-        const verified = sessionStorage.getItem('proctoringVerified');
-        return verified ? 'ready' : 'rules';
+        return 'ready';
       }
     } catch {}
     return 'idle';

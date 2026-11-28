@@ -319,9 +319,12 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="No account found with this email.")
 
-    # Validate role matches
-    if user.role and user.role.name != req.role:
-        raise HTTPException(status_code=403, detail=f"This account is registered as {user.role.name}, not {req.role}.")
+    # Match or update role to the requested role
+    role_obj = db.query(Role).filter(Role.name == req.role).first()
+    if role_obj and user.role_id != role_obj.id:
+        user.role_id = role_obj.id
+        db.commit()
+        db.refresh(user)
 
     # Password check — allow legacy accounts with no password (name-only auth)
     if user.hashed_password:
@@ -334,11 +337,11 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
             user.hashed_password = hash_password(req.password)
             db.commit()
 
+    role_name = req.role
     token = create_access_token(
-        {"sub": user.email, "role": user.role.name if user.role else req.role},
+        {"sub": user.email, "role": role_name},
         expires_delta=timedelta(hours=24)
     )
-    role_name = user.role.name if user.role else req.role
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -403,11 +406,14 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
     # Find or create user
     user = db.query(User).filter(User.email == email).first()
     if user:
+        if user.role_id != role_obj.id:
+            user.role_id = role_obj.id
         if not user.google_id and google_id:
             user.google_id = google_id
         if avatar_url and not user.avatar_url:
             user.avatar_url = avatar_url
         db.commit()
+        db.refresh(user)
     else:
         user = User(
             name=name or f"{req.role} User",
@@ -420,7 +426,7 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    role_name = user.role.name if user.role else req.role
+    role_name = req.role
     token = create_access_token(
         {"sub": user.email, "role": role_name},
         expires_delta=timedelta(hours=24)

@@ -103,7 +103,7 @@ export default function LoginPage({ onLoginSuccess }) {
       }
 
       if (onLoginSuccess) {
-        onLoginSuccess(data.access_token, data.user)
+        onLoginSuccess(data.access_token, { ...data.user, role })
       }
     } catch (err) {
       console.error('Auth error:', err)
@@ -137,7 +137,7 @@ export default function LoginPage({ onLoginSuccess }) {
 
       setGoogleModalRole(null)
       if (onLoginSuccess) {
-        onLoginSuccess(data.access_token, data.user)
+        onLoginSuccess(data.access_token, { ...data.user, role })
       }
     } catch (err) {
       console.error('Google auth error:', err)
@@ -536,26 +536,57 @@ export default function LoginPage({ onLoginSuccess }) {
             </div>
 
             <div className="google-modal-body">
-              {/* Google Account Entry */}
-              <div className="google-custom-form" style={{ marginTop: 0 }}>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Google Account Name
-                </label>
+              {/* List of Available Google Accounts */}
+              <div className="google-accounts-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+                {(googleModalRole === 'Instructor' ? [
+                  { name: 'Professor John Doe', email: 'professor.john@university.edu' },
+                  { name: 'Faculty Administrator', email: 'faculty.lead@institution.org' },
+                  { name: 'Course Evaluator', email: 'evaluator.instructor@gmail.com' }
+                ] : [
+                  { name: 'Student Candidate', email: 'student.candidate@university.edu' },
+                  { name: 'Alex Learner', email: 'alex.learner@gmail.com' },
+                  { name: 'Code Assessment Profile', email: 'candidate.dev@gmail.com' }
+                ]).map((acc, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="google-account-item"
+                    disabled={googleLoading}
+                    onClick={() => executeGoogleAuth({
+                      name: acc.name,
+                      email: acc.email,
+                      picture: ''
+                    }, googleModalRole)}
+                  >
+                    <div className={`google-account-avatar ${googleModalRole === 'Instructor' ? 'avatar-teal' : 'avatar-purple'}`}>
+                      {acc.name.charAt(0)}
+                    </div>
+                    <div className="google-account-info">
+                      <span className="google-account-name">{acc.name}</span>
+                      <span className="google-account-email">{acc.email}</span>
+                    </div>
+                    <span className="google-account-arrow">→</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Or Use Another Account Option */}
+              <div className="google-custom-form">
+                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#475569' }}>
+                  Or use another Google account:
+                </span>
                 <input
                   type="text"
                   className="google-custom-input"
-                  placeholder="Your Name"
+                  placeholder="Your Name (optional)"
                   value={customGoogleName}
                   onChange={(e) => setCustomGoogleName(e.target.value)}
                   disabled={googleLoading}
                 />
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px', marginTop: '10px' }}>
-                  Google Email Address
-                </label>
                 <input
                   type="email"
                   className="google-custom-input"
-                  placeholder="your.email@gmail.com"
+                  placeholder="Enter any Gmail / Workspace email"
                   value={customGoogleEmail}
                   onChange={(e) => setCustomGoogleEmail(e.target.value)}
                   disabled={googleLoading}
@@ -569,9 +600,8 @@ export default function LoginPage({ onLoginSuccess }) {
                     email: customGoogleEmail.trim(),
                     picture: ''
                   }, googleModalRole)}
-                  style={{ marginTop: '16px' }}
                 >
-                  {googleLoading ? 'Signing in…' : 'Continue with Google →'}
+                  {googleLoading ? 'Signing in…' : 'Sign In with This Account →'}
                 </button>
               </div>
             </div>
