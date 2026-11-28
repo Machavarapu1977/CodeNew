@@ -33,11 +33,12 @@ _PLACEHOLDER_VALUES = {"", "your-email@gmail.com", "your-app-password"}
 
 
 def _get_smtp_config():
-    host = os.getenv("SMTP_HOST", "").strip()
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER", "").strip()
-    passwd = os.getenv("SMTP_PASS", "").strip()
-    email_from = os.getenv("EMAIL_FROM", f"MockTest AI <{user}>").strip()
+    load_dotenv(override=True)
+    host = os.getenv("SMTP_HOST", "").strip().strip('"').strip("'")
+    port = int(os.getenv("SMTP_PORT", "587").strip())
+    user = os.getenv("SMTP_USER", "").strip().strip('"').strip("'")
+    passwd = os.getenv("SMTP_PASS", "").strip().strip('"').strip("'").replace(" ", "")
+    email_from = os.getenv("EMAIL_FROM", f"MockTest AI <{user}>").strip().strip('"').strip("'")
     is_configured = bool(
         host
         and user not in _PLACEHOLDER_VALUES
@@ -67,21 +68,13 @@ def otp_expires_at() -> datetime:
 
 
 def _send_smtp(to_email: str, subject: str, html_body: str) -> bool:
-    """Send email via SMTP. Falls back to console print if not configured.
+    """Send email via SMTP. Falls back to console print if not configured or on SMTP error.
     Returns True if delivered via SMTP, False if dev fallback was used.
     """
     smtp_host, smtp_port, smtp_user, smtp_pass, email_from, is_configured = _get_smtp_config()
     if not is_configured:
         # Development fallback — print OTP to terminal immediately (flush=True for piped logs)
-        print(f"\n{'='*50}", flush=True)
-        print(f"[DEV EMAIL] To: {to_email}", flush=True)
-        print(f"[DEV EMAIL] Subject: {subject}", flush=True)
-        # Extract OTP from html for quick visibility
-        import re
-        otps = re.findall(r'\b\d{6}\b', html_body)
-        if otps:
-            print(f"[DEV EMAIL] OTP: {otps[0]}", flush=True)
-        print(f"{'='*50}\n", flush=True)
+        _print_dev_otp(to_email, subject, html_body)
         return False
 
     msg = MIMEMultipart("alternative")
@@ -90,12 +83,34 @@ def _send_smtp(to_email: str, subject: str, html_body: str) -> bool:
     msg["To"] = to_email
     msg.attach(MIMEText(html_body, "html"))
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, to_email, msg.as_string())
-    return True
+    try:
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, to_email, msg.as_string())
+        return True
+    except Exception as smtp_err:
+        print(f"[SMTP ERROR] Failed to send email via {smtp_host}:{smtp_port} ({type(smtp_err).__name__}: {smtp_err})", flush=True)
+        _print_dev_otp(to_email, subject, html_body)
+        return False
+
+
+def _print_dev_otp(to_email: str, subject: str, html_body: str) -> None:
+    print(f"\n{'='*50}", flush=True)
+    print(f"[DEV EMAIL] To: {to_email}", flush=True)
+    print(f"[DEV EMAIL] Subject: {subject}", flush=True)
+    import re
+    otps = re.findall(r'\b\d{6}\b', html_body)
+    if otps:
+        print(f"[DEV EMAIL] OTP: {otps[0]}", flush=True)
+    print(f"{'='*50}\n", flush=True)
 
 
 def send_signup_otp(to_email: str, name: str, otp: str) -> bool:

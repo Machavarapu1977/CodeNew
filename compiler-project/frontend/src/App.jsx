@@ -7,6 +7,7 @@ import ProctoringWidget from './components/ProctoringWidget'
 import LoginPage from './components/LoginPage'
 import ProctoringRulesModal from './components/ProctoringRulesModal'
 import CameraPermissionModal from './components/CameraPermissionModal'
+import StudentHub from './components/StudentHub'
 import Editor from '@monaco-editor/react'
 
 const starterTemplates = {
@@ -48,6 +49,14 @@ function App() {
       setPreExamStep('idle');
     } else {
       setStudentName(simplifiedUser.name);
+      setIsPracticeMode(false);
+      try {
+        const key = `attemptedTests_${simplifiedUser.email || simplifiedUser.id || 'guest'}`;
+        const raw = localStorage.getItem(key);
+        setAttemptedTests(raw ? JSON.parse(raw) : []);
+      } catch {
+        setAttemptedTests([]);
+      }
       setPreExamStep('ready');
     }
   };
@@ -143,9 +152,32 @@ function App() {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [showSubmissionNote, setShowSubmissionNote] = useState(false);
   const [submissionNoteData, setSubmissionNoteData] = useState(null);
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const [attemptedTests, setAttemptedTests] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      const parsed = savedUser ? JSON.parse(savedUser) : null;
+      const key = `attemptedTests_${parsed?.email || parsed?.id || 'guest'}`;
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
-  // Pre-exam flow: rules → camera permissions → exam
-  // 'idle' | 'rules' | 'camera' | 'ready'
+  const saveAttemptToHistory = (attemptRecord) => {
+    setAttemptedTests((prev) => {
+      const updated = [attemptRecord, ...prev];
+      try {
+        const key = `attemptedTests_${user?.email || user?.id || 'guest'}`;
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  // Pre-exam flow: rules → camera permissions → exam → hub
+  // 'idle' | 'rules' | 'camera' | 'ready' | 'hub'
   const [preExamStep, setPreExamStep] = useState(() => {
     try {
       const savedUser = localStorage.getItem('user');
@@ -178,7 +210,7 @@ function App() {
 
   // Exam countdown timer
   useEffect(() => {
-    if (selectedRole !== 'Student' || isExamFinished) return;
+    if (selectedRole !== 'Student' || isExamFinished || isPracticeMode || preExamStep !== 'ready') return;
 
     // Tick every second using wall-clock synchronization
     const timer = setInterval(() => {
@@ -203,14 +235,14 @@ function App() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [selectedRole, isExamFinished]);
+  }, [selectedRole, isExamFinished, isPracticeMode, preExamStep]);
 
   // When timer reaches 0 during an active student exam, trigger auto-submit
   useEffect(() => {
-    if (selectedRole === 'Student' && !isExamFinished && timeLeft === 0) {
+    if (selectedRole === 'Student' && !isExamFinished && !isPracticeMode && preExamStep === 'ready' && timeLeft === 0) {
       handleConfirmFinishExam(true);
     }
-  }, [timeLeft, selectedRole, isExamFinished]);
+  }, [timeLeft, selectedRole, isExamFinished, isPracticeMode, preExamStep]);
 
   const formatTime = (totalSeconds) => {
     const validSec = Math.max(0, Math.floor(totalSeconds || 0));
@@ -294,8 +326,10 @@ function App() {
         } catch (_) { /* violations fetch is non-critical */ }
       }
 
-      // Show styled in-app submission note instead of alert()
-      setSubmissionNoteData({
+      const attemptData = {
+        attemptId: `att_${Date.now()}`,
+        testId: targetTestId,
+        completedAt: new Date().toISOString(),
         noteText,
         solvedCount: solvedSnap.length,
         totalQuestions: questionsSnap.length,
@@ -309,11 +343,16 @@ function App() {
         totalDurationMinutes: durationSnap,
         integrityReport,
         violations: violationsList
-      });
+      };
+      saveAttemptToHistory(attemptData);
+      setSubmissionNoteData(attemptData);
       setShowSubmissionNote(true);
     } catch (err) {
       console.error('Error finishing test:', err);
-      setSubmissionNoteData({
+      const fallbackAttempt = {
+        attemptId: `att_${Date.now()}`,
+        testId: targetTestId,
+        completedAt: new Date().toISOString(),
         noteText: isAutoSubmit
           ? "Time's up! Your test has been submitted."
           : 'Your test has been submitted successfully!',
@@ -326,7 +365,9 @@ function App() {
         testInfo: selectedTest,
         studentName: studentSnap,
         totalDurationMinutes: selectedTest?.duration_minutes || 45
-      });
+      };
+      saveAttemptToHistory(fallbackAttempt);
+      setSubmissionNoteData(fallbackAttempt);
       setShowSubmissionNote(true);
     } finally {
       // Mark exam as finished and clear active test from storage
@@ -340,15 +381,13 @@ function App() {
     }
   };
 
-  // Called when student dismisses the submission note and wants to go back to dashboard
+  // Called when student dismisses the submission note and wants to go back to tests & practice hub
   const handleDismissSubmissionNote = () => {
     setShowSubmissionNote(false);
     setSubmissionNoteData(null);
     setIsExamFinished(false);
-    setSelectedRole(null);
-    if (testsList.length > 0) {
-      handleTestSelect(testsList[0], true);
-    }
+    setIsPracticeMode(false);
+    setPreExamStep('hub');
   };
 
   // Called when student wants to see the detailed report from the submission note
@@ -923,6 +962,130 @@ function App() {
     return <InstructorDashboard user={demoUser} onLogout={handleLogout} />;
   }
 
+  if (selectedRole === 'Student' && preExamStep === 'hub') {
+    return (
+      <>
+        <StudentHub
+          user={demoUser}
+          testsList={testsList}
+          attemptedTests={attemptedTests}
+          onStartTest={(testObj) => {
+            setIsPracticeMode(false);
+            setIsExamFinished(false);
+            setPendingTestInfo(testObj);
+            setPreExamStep('rules');
+          }}
+          onCreateTestClick={() => {
+            setFilteredBankQuestions(allBankQuestions);
+            setIsStudentTestModalOpen(true);
+          }}
+          onViewAttemptReport={(attempt) => {
+            setSubmissionNoteData(attempt);
+            setShowEvaluationReport(true);
+          }}
+          onStartPracticeProblem={(problemObj, allProblems) => {
+            setIsPracticeMode(true);
+            setIsExamFinished(false);
+            setSelectedTest(null);
+            setSelectedTestId(null);
+            const list = allProblems && allProblems.length > 0 ? allProblems : [problemObj];
+            const idx = Math.max(0, list.findIndex(q => q.id === problemObj.id));
+            setQuestionsList(list);
+            loadQuestion(problemObj.id, list, idx);
+            setPreExamStep('ready');
+          }}
+          onLogout={handleLogout}
+        />
+        <EvaluationReportModal
+          isOpen={showEvaluationReport}
+          onClose={() => {
+            setShowEvaluationReport(false);
+            setSubmissionNoteData(null);
+          }}
+          testInfo={submissionNoteData?.testInfo || null}
+          questions={submissionNoteData?.questions || []}
+          solvedQuestionIds={submissionNoteData?.solvedQuestionIds || []}
+          questionSubmissions={submissionNoteData?.questionSubmissions || {}}
+          timeTakenSeconds={submissionNoteData?.timeTakenSeconds || 0}
+          totalDurationMinutes={submissionNoteData?.totalDurationMinutes || 45}
+          studentName={submissionNoteData?.studentName || demoUser.name}
+          integrityReport={submissionNoteData?.integrityReport || null}
+          violations={submissionNoteData?.violations || []}
+          onRetakeOrNewTest={() => {
+            setShowEvaluationReport(false);
+            if (submissionNoteData?.testInfo) {
+              setIsPracticeMode(false);
+              setIsExamFinished(false);
+              setPendingTestInfo(submissionNoteData.testInfo);
+              setPreExamStep('rules');
+            } else {
+              setIsStudentTestModalOpen(true);
+            }
+          }}
+        />
+        {isStudentTestModalOpen && (
+          <div className="id-modal-overlay" onClick={() => setIsStudentTestModalOpen(false)}>
+            <div className="id-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+              <div className="id-modal-header">
+                <h3>⚡ Auto-Generate Mock Test</h3>
+                <button className="id-modal-close" onClick={() => setIsStudentTestModalOpen(false)}>×</button>
+              </div>
+              <form
+                onSubmit={async (e) => {
+                  await handleCreateStudentTest(e);
+                  setIsPracticeMode(false);
+                  setPreExamStep('ready');
+                }}
+                className="id-modal-form"
+              >
+                <div className="id-form-group">
+                  <label className="id-form-label">Test Title</label>
+                  <input
+                    type="text"
+                    className="id-form-input"
+                    placeholder="e.g., Practice Assessment"
+                    value={newTestTitle}
+                    onChange={(e) => setNewTestTitle(e.target.value)}
+                  />
+                </div>
+                <div className="id-form-row">
+                  <div className="id-form-group flex-1">
+                    <label className="id-form-label">Duration (mins)</label>
+                    <input
+                      type="number"
+                      className="id-form-input"
+                      value={newTestDuration}
+                      onChange={(e) => setNewTestDuration(e.target.value)}
+                      min={10}
+                      max={180}
+                    />
+                  </div>
+                  <div className="id-form-group flex-1">
+                    <label className="id-form-label">Questions</label>
+                    <input
+                      type="number"
+                      className="id-form-input"
+                      value={autoGenNumQuestions}
+                      onChange={(e) => setAutoGenNumQuestions(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)))}
+                      min={1}
+                      max={20}
+                    />
+                  </div>
+                </div>
+                <div className="id-modal-footer">
+                  <button type="button" className="id-modal-cancel-btn" onClick={() => setIsStudentTestModalOpen(false)}>Cancel</button>
+                  <button type="submit" className="id-modal-submit-btn" disabled={isCreatingTest}>
+                    {isCreatingTest ? '⚡ Generating...' : '⚡ Generate & Start'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   if (selectedRole === 'Student') {
     return (
       <div className="app-container student-page">
@@ -940,26 +1103,34 @@ function App() {
                 }}
               />
             </div>
-            <div
-              className={`timer-badge ${timeLeft <= 300 ? 'timer-warning' : ''} ${timeLeft <= 60 ? 'timer-critical' : ''}`}
-              title="Remaining Time"
-            >
-              <span className="timer-icon">⏱</span>
-              <span className="timer-text">{formatTime(timeLeft)}</span>
-            </div>
-            <div
-              className="header-solved-counter"
-              onClick={() => setShowEvaluationReport(true)}
-              style={{ cursor: 'pointer' }}
-              title="Click to view detailed Evaluation Report"
-            >
-              <GreenOutlinedTick size={15} />
-              <span>{solvedQuestionIds.length}/{questionsList.length || 1} Solved</span>
-            </div>
-            <div className="proctor-shield-badge" title="Real-time AI Proctoring Active">
-              <span className="proctor-shield-icon">🛡️</span>
-              <span className="proctor-shield-text">Proctored</span>
-            </div>
+            {!isPracticeMode ? (
+              <>
+                <div
+                  className={`timer-badge ${timeLeft <= 300 ? 'timer-warning' : ''} ${timeLeft <= 60 ? 'timer-critical' : ''}`}
+                  title="Remaining Time"
+                >
+                  <span className="timer-icon">⏱</span>
+                  <span className="timer-text">{formatTime(timeLeft)}</span>
+                </div>
+                <div
+                  className="header-solved-counter"
+                  onClick={() => setShowEvaluationReport(true)}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to view detailed Evaluation Report"
+                >
+                  <GreenOutlinedTick size={15} />
+                  <span>{solvedQuestionIds.length}/{questionsList.length || 1} Solved</span>
+                </div>
+                <div className="proctor-shield-badge" title="Real-time AI Proctoring Active">
+                  <span className="proctor-shield-icon">🛡️</span>
+                  <span className="proctor-shield-text">Proctored</span>
+                </div>
+              </>
+            ) : (
+              <span className="proctor-shield-badge" style={{ background: '#dcfce7', color: '#166534', borderColor: '#bbf7d0' }}>
+                💻 Practice Mode
+              </span>
+            )}
             <button
               className="student-test-btn"
               onClick={() => {
@@ -992,12 +1163,25 @@ function App() {
                 👤 {studentName}
               </span>
             )}
-            <button
-              className="finish-exam-btn"
-              onClick={handleFinishExamClick}
-            >
-              Finish Exam
-            </button>
+            {isPracticeMode ? (
+              <button
+                className="finish-exam-btn"
+                style={{ background: '#0f172a' }}
+                onClick={() => {
+                  setIsPracticeMode(false);
+                  setPreExamStep('hub');
+                }}
+              >
+                ← Back to Tests & Practice
+              </button>
+            ) : (
+              <button
+                className="finish-exam-btn"
+                onClick={handleFinishExamClick}
+              >
+                Finish Exam
+              </button>
+            )}
             <button className="logout-btn" onClick={handleLogout}>
               Logout
             </button>
@@ -1541,16 +1725,14 @@ function App() {
           isOpen={showEvaluationReport}
           onClose={() => {
             setShowEvaluationReport(false);
-            // After viewing report, return to dashboard if exam was finished
+            // After viewing report, return to Student Hub if exam was finished
             if (isExamFinished) {
               setSolvedQuestionIds([]);
               setQuestionSubmissions({});
               setSubmissionNoteData(null);
               setIsExamFinished(false);
-              setSelectedRole(null);
-              if (testsList.length > 0) {
-                handleTestSelect(testsList[0], true);
-              }
+              setIsPracticeMode(false);
+              setPreExamStep('hub');
             }
           }}
           testInfo={submissionNoteData?.testInfo || selectedTest}
@@ -1568,7 +1750,7 @@ function App() {
         />
 
         {/* ── Proctoring Agent Widget ── */}
-        {!isExamFinished && (
+        {!isExamFinished && !isPracticeMode && (
           <ProctoringWidget
             testId={selectedTestId || selectedTest?.id || 1}
             studentName={studentName || user?.name || 'Student'}
