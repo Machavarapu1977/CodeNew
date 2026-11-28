@@ -536,72 +536,26 @@ export default function LoginPage({ onLoginSuccess }) {
             </div>
 
             <div className="google-modal-body">
-              {/* Quick Google Account Options */}
-              <button
-                type="button"
-                className="google-account-item"
-                disabled={googleLoading}
-                onClick={() => executeGoogleAuth({
-                  name: googleModalRole === 'Instructor' ? 'Dr. Sarah Connor' : 'Alex Morgan',
-                  email: googleModalRole === 'Instructor' ? 'sarah.instructor@gmail.com' : 'alex.student@gmail.com',
-                  picture: ''
-                }, googleModalRole)}
-              >
-                <div className={`google-account-avatar ${googleModalRole === 'Instructor' ? 'avatar-teal' : 'avatar-purple'}`}>
-                  {googleModalRole === 'Instructor' ? 'S' : 'A'}
-                </div>
-                <div className="google-account-info">
-                  <span className="google-account-name">
-                    {googleModalRole === 'Instructor' ? 'Dr. Sarah Connor' : 'Alex Morgan'}
-                  </span>
-                  <span className="google-account-email">
-                    {googleModalRole === 'Instructor' ? 'sarah.instructor@gmail.com' : 'alex.student@gmail.com'}
-                  </span>
-                </div>
-                <span className="google-account-arrow">→</span>
-              </button>
-
-              <button
-                type="button"
-                className="google-account-item"
-                disabled={googleLoading}
-                onClick={() => executeGoogleAuth({
-                  name: googleModalRole === 'Instructor' ? 'Prof. David Miller' : 'Emily Watson',
-                  email: googleModalRole === 'Instructor' ? 'david.prof@gmail.com' : 'emily.student@gmail.com',
-                  picture: ''
-                }, googleModalRole)}
-              >
-                <div className={`google-account-avatar ${googleModalRole === 'Instructor' ? 'avatar-teal' : 'avatar-purple'}`}>
-                  {googleModalRole === 'Instructor' ? 'D' : 'E'}
-                </div>
-                <div className="google-account-info">
-                  <span className="google-account-name">
-                    {googleModalRole === 'Instructor' ? 'Prof. David Miller' : 'Emily Watson'}
-                  </span>
-                  <span className="google-account-email">
-                    {googleModalRole === 'Instructor' ? 'david.prof@gmail.com' : 'emily.student@gmail.com'}
-                  </span>
-                </div>
-                <span className="google-account-arrow">→</span>
-              </button>
-
-              {/* Custom Google Account Entry */}
-              <div className="google-custom-form">
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>
-                  Or use another Google account:
-                </span>
+              {/* Google Account Entry */}
+              <div className="google-custom-form" style={{ marginTop: 0 }}>
+                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Google Account Name
+                </label>
                 <input
                   type="text"
                   className="google-custom-input"
-                  placeholder="Your Full Name"
+                  placeholder="Your Name"
                   value={customGoogleName}
                   onChange={(e) => setCustomGoogleName(e.target.value)}
                   disabled={googleLoading}
                 />
+                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px', marginTop: '10px' }}>
+                  Google Email Address
+                </label>
                 <input
                   type="email"
                   className="google-custom-input"
-                  placeholder="name@gmail.com"
+                  placeholder="your.email@gmail.com"
                   value={customGoogleEmail}
                   onChange={(e) => setCustomGoogleEmail(e.target.value)}
                   disabled={googleLoading}
@@ -615,8 +569,9 @@ export default function LoginPage({ onLoginSuccess }) {
                     email: customGoogleEmail.trim(),
                     picture: ''
                   }, googleModalRole)}
+                  style={{ marginTop: '16px' }}
                 >
-                  {googleLoading ? 'Signing in…' : 'Continue with this Account →'}
+                  {googleLoading ? 'Signing in…' : 'Continue with Google →'}
                 </button>
               </div>
             </div>
