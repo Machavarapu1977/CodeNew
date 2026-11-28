@@ -20,17 +20,30 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
-SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-EMAIL_FROM = os.getenv("EMAIL_FROM", f"MockTest AI <{SMTP_USER}>")
+load_dotenv()
 
 OTP_EXPIRY_MINUTES = 5
 OTP_LENGTH = 6
 MAX_ATTEMPTS = 5
 RESEND_COOLDOWN_SECONDS = 60
+
+_PLACEHOLDER_VALUES = {"", "your-email@gmail.com", "your-app-password"}
+
+
+def _get_smtp_config():
+    host = os.getenv("SMTP_HOST", "").strip()
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER", "").strip()
+    passwd = os.getenv("SMTP_PASS", "").strip()
+    email_from = os.getenv("EMAIL_FROM", f"MockTest AI <{user}>").strip()
+    is_configured = bool(
+        host
+        and user not in _PLACEHOLDER_VALUES
+        and passwd not in _PLACEHOLDER_VALUES
+    )
+    return host, port, user, passwd, email_from, is_configured
 
 
 def generate_otp() -> str:
@@ -53,35 +66,39 @@ def otp_expires_at() -> datetime:
     return datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
 
-def _send_smtp(to_email: str, subject: str, html_body: str) -> None:
-    """Send email via SMTP. Falls back to console print if not configured."""
-    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
-        # Development fallback — print OTP to terminal
-        print(f"\n{'='*50}")
-        print(f"[DEV EMAIL] To: {to_email}")
-        print(f"[DEV EMAIL] Subject: {subject}")
+def _send_smtp(to_email: str, subject: str, html_body: str) -> bool:
+    """Send email via SMTP. Falls back to console print if not configured.
+    Returns True if delivered via SMTP, False if dev fallback was used.
+    """
+    smtp_host, smtp_port, smtp_user, smtp_pass, email_from, is_configured = _get_smtp_config()
+    if not is_configured:
+        # Development fallback — print OTP to terminal immediately (flush=True for piped logs)
+        print(f"\n{'='*50}", flush=True)
+        print(f"[DEV EMAIL] To: {to_email}", flush=True)
+        print(f"[DEV EMAIL] Subject: {subject}", flush=True)
         # Extract OTP from html for quick visibility
         import re
         otps = re.findall(r'\b\d{6}\b', html_body)
         if otps:
-            print(f"[DEV EMAIL] OTP: {otps[0]}")
-        print(f"{'='*50}\n")
-        return
+            print(f"[DEV EMAIL] OTP: {otps[0]}", flush=True)
+        print(f"{'='*50}\n", flush=True)
+        return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = EMAIL_FROM
+    msg["From"] = email_from
     msg["To"] = to_email
     msg.attach(MIMEText(html_body, "html"))
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.ehlo()
         server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(SMTP_USER, to_email, msg.as_string())
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_user, to_email, msg.as_string())
+    return True
 
 
-def send_signup_otp(to_email: str, name: str, otp: str) -> None:
+def send_signup_otp(to_email: str, name: str, otp: str) -> bool:
     subject = "Your MockTest AI Verification Code"
     html_body = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;
@@ -104,10 +121,10 @@ def send_signup_otp(to_email: str, name: str, otp: str) -> None:
         <p style="color:#a0aec0;font-size:11px;text-align:center;">MockTest AI — Secure Examination Platform</p>
     </div>
     """
-    _send_smtp(to_email, subject, html_body)
+    return _send_smtp(to_email, subject, html_body)
 
 
-def send_reset_otp(to_email: str, otp: str) -> None:
+def send_reset_otp(to_email: str, otp: str) -> bool:
     subject = "MockTest AI — Password Reset Code"
     html_body = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;
@@ -130,4 +147,4 @@ def send_reset_otp(to_email: str, otp: str) -> None:
         <p style="color:#a0aec0;font-size:11px;text-align:center;">MockTest AI — Secure Examination Platform</p>
     </div>
     """
-    _send_smtp(to_email, subject, html_body)
+    return _send_smtp(to_email, subject, html_body)
