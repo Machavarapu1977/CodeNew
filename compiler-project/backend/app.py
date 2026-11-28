@@ -4,15 +4,18 @@ from services.piston_service import execute_code
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
+from datetime import datetime
 from schemas import (
-    RunRequest, SubmissionRequest, LoginRequest, RegisterRequest, GoogleAuthRequest,
+    RunRequest, SubmissionRequest, LoginRequest, RegisterRequest,
+    OtpSendRequest, OtpVerifyRequest, OtpResendRequest,
+    PasswordResetSendRequest, PasswordResetVerifyRequest,
     TokenResponse, UserResponse,
     TemplateResponse, QuestionCreateRequest, QuestionResponse, TestCreateRequest,
     TestResponse, AIGenerateRequest, VectorSearchRequest, PineconeSyncResponse,
     AutoGenerateTestRequest, ViolationCreate, ViolationResponse, ProctoringStatusResponse,
     CheckFaceRequest
 )
-from models import Question, TestCase, Role, User, QuestionTemplate, Test, Violation
+from models import Question, TestCase, Role, User, QuestionTemplate, Test, Violation, OtpVerification
 from services.evaluator import evaluate_output
 from services.pinecone_service import upsert_question_to_pinecone, search_questions_in_pinecone, sync_all_questions_to_pinecone
 from auth import create_access_token, get_current_user, require_role, get_db
@@ -157,7 +160,8 @@ try:
             for col, col_type in [
                 ("hashed_password", "VARCHAR(255)"),
                 ("google_id", "VARCHAR(255)"),
-                ("avatar_url", "VARCHAR(500)")
+                ("avatar_url", "VARCHAR(500)"),
+                ("email_verified", "INTEGER NOT NULL DEFAULT 0"),
             ]:
                 try:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {col_type};"))
@@ -272,7 +276,10 @@ async def health_check():
 
 @app.post("/auth/register", response_model=TokenResponse)
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new user (Instructor or Student) with email + password."""
+    """Register a new user (Instructor or Student) with email + password.
+    For Students: account is inactive until email OTP is verified.
+    For Instructors: direct activation (no OTP required).
+    """
     from auth import hash_password, create_access_token
     from datetime import timedelta
 
@@ -293,6 +300,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
         email=req.email.strip().lower(),
         hashed_password=hash_password(req.password),
         role_id=role_obj.id,
+        email_verified=(req.role == "Instructor"),  # Instructors verified immediately
     )
     db.add(new_user)
     db.commit()
@@ -309,6 +317,314 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     }
 
 
+# ── OTP SIGNUP ROUTES ─────────────────────────────────────────────────────────
+
+@app.post("/auth/otp/send-signup")
+def otp_send_signup(req: OtpSendRequest, db: Session = Depends(get_db)):
+    """
+    Step 1 of OTP signup: validate fields, send OTP to email.
+    Does NOT create a User record until OTP is verified.
+    """
+    from auth import hash_password
+    from services.email_service import (
+        generate_otp, hash_otp, otp_expires_at, send_signup_otp,
+        RESEND_COOLDOWN_SECONDS
+    )
+    from datetime import timedelta
+    import json as _json
+
+    email = req.email.strip().lower()
+    name = req.name.strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Full name is required.")
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    # Email already registered and verified
+    existing = db.query(User).filter(User.email == email).first()
+    if existing and existing.email_verified:
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+
+    role_obj = db.query(Role).filter(Role.name == req.role).first()
+    if not role_obj:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {req.role}")
+
+    # Resend cooldown check
+    latest = (
+        db.query(OtpVerification)
+        .filter(OtpVerification.email == email, OtpVerification.purpose == "signup")
+        .order_by(OtpVerification.last_sent_at.desc())
+        .first()
+    )
+    if latest and not latest.is_used:
+        elapsed = (datetime.utcnow() - latest.last_sent_at).total_seconds()
+        if elapsed < RESEND_COOLDOWN_SECONDS:
+            wait = int(RESEND_COOLDOWN_SECONDS - elapsed)
+            raise HTTPException(status_code=429, detail=f"Please wait {wait}s before resending.")
+        # Invalidate old OTP
+        latest.is_used = True
+        db.commit()
+
+    otp = generate_otp()
+    pending = _json.dumps({
+        "name": name,
+        "email": email,
+        "hashed_password": hash_password(req.password),
+        "role": req.role,
+        "role_id": role_obj.id,
+    })
+
+    record = OtpVerification(
+        email=email,
+        purpose="signup",
+        otp_hash=hash_otp(otp),
+        pending_data=pending,
+        attempts=0,
+        last_sent_at=datetime.utcnow(),
+        expires_at=otp_expires_at(),
+        is_used=False,
+    )
+    db.add(record)
+    db.commit()
+
+    send_signup_otp(email, name, otp)
+
+    return {"detail": f"Verification code sent to {email}. It expires in 5 minutes."}
+
+
+@app.post("/auth/otp/verify-signup", response_model=TokenResponse)
+def otp_verify_signup(req: OtpVerifyRequest, db: Session = Depends(get_db)):
+    """
+    Step 2: Verify OTP, create User, return JWT.
+    """
+    from auth import create_access_token
+    from services.email_service import verify_otp_hash, MAX_ATTEMPTS
+    from datetime import timedelta
+    import json as _json
+
+    email = req.email.strip().lower()
+
+    record = (
+        db.query(OtpVerification)
+        .filter(
+            OtpVerification.email == email,
+            OtpVerification.purpose == "signup",
+            OtpVerification.is_used == False,
+        )
+        .order_by(OtpVerification.last_sent_at.desc())
+        .first()
+    )
+
+    if not record:
+        raise HTTPException(status_code=400, detail="No pending verification found. Please sign up again.")
+
+    if datetime.utcnow() > record.expires_at:
+        record.is_used = True
+        db.commit()
+        raise HTTPException(status_code=400, detail="Verification code has expired. Please request a new one.")
+
+    if record.attempts >= MAX_ATTEMPTS:
+        record.is_used = True
+        db.commit()
+        raise HTTPException(status_code=400, detail="Too many failed attempts. Please sign up again.")
+
+    if not verify_otp_hash(req.otp.strip(), record.otp_hash):
+        record.attempts += 1
+        db.commit()
+        remaining = MAX_ATTEMPTS - record.attempts
+        raise HTTPException(status_code=400, detail=f"Incorrect code. {remaining} attempt(s) remaining.")
+
+    # OTP is valid — create user
+    pending = _json.loads(record.pending_data)
+
+    # Guard: account may have been created between send and verify
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        if not existing.email_verified:
+            existing.email_verified = True
+            db.commit()
+            db.refresh(existing)
+        record.is_used = True
+        db.commit()
+        new_user = existing
+    else:
+        new_user = User(
+            name=pending["name"],
+            email=email,
+            hashed_password=pending["hashed_password"],
+            role_id=pending["role_id"],
+            email_verified=True,
+        )
+        db.add(new_user)
+        record.is_used = True
+        db.commit()
+        db.refresh(new_user)
+
+    role_name = pending["role"]
+    token = create_access_token(
+        {"sub": new_user.email, "role": role_name},
+        expires_delta=timedelta(hours=24)
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": new_user.id, "name": new_user.name, "email": new_user.email, "role": role_name}
+    }
+
+
+@app.post("/auth/otp/resend")
+def otp_resend(req: OtpResendRequest, db: Session = Depends(get_db)):
+    """Resend OTP for signup or reset with cooldown enforcement."""
+    from services.email_service import (
+        generate_otp, hash_otp, otp_expires_at, send_signup_otp, send_reset_otp,
+        RESEND_COOLDOWN_SECONDS
+    )
+
+    email = req.email.strip().lower()
+
+    record = (
+        db.query(OtpVerification)
+        .filter(
+            OtpVerification.email == email,
+            OtpVerification.purpose == req.purpose,
+            OtpVerification.is_used == False,
+        )
+        .order_by(OtpVerification.last_sent_at.desc())
+        .first()
+    )
+
+    if not record:
+        raise HTTPException(status_code=400, detail="No active session found. Please start over.")
+
+    elapsed = (datetime.utcnow() - record.last_sent_at).total_seconds()
+    if elapsed < RESEND_COOLDOWN_SECONDS:
+        wait = int(RESEND_COOLDOWN_SECONDS - elapsed)
+        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before resending.")
+
+    otp = generate_otp()
+    record.otp_hash = hash_otp(otp)
+    record.attempts = 0
+    record.last_sent_at = datetime.utcnow()
+    record.expires_at = otp_expires_at()
+    db.commit()
+
+    if req.purpose == "reset":
+        send_reset_otp(email, otp)
+    else:
+        import json as _j
+        pending = _j.loads(record.pending_data) if record.pending_data else {}
+        send_signup_otp(email, pending.get("name", ""), otp)
+
+    return {"detail": "A new verification code has been sent."}
+
+
+# ── PASSWORD RESET ROUTES ─────────────────────────────────────────────────────
+
+@app.post("/auth/password-reset/send")
+def password_reset_send(req: PasswordResetSendRequest, db: Session = Depends(get_db)):
+    """
+    Send password-reset OTP.
+    Returns same message regardless of whether the email exists (no enumeration).
+    """
+    from services.email_service import (
+        generate_otp, hash_otp, otp_expires_at, send_reset_otp,
+        RESEND_COOLDOWN_SECONDS
+    )
+
+    email = req.email.strip().lower()
+
+    user = db.query(User).filter(User.email == email).first()
+    # Always return success to avoid email enumeration
+    if not user:
+        return {"detail": "If this email is registered, a reset code will be sent."}
+
+    # Cooldown
+    latest = (
+        db.query(OtpVerification)
+        .filter(OtpVerification.email == email, OtpVerification.purpose == "reset")
+        .order_by(OtpVerification.last_sent_at.desc())
+        .first()
+    )
+    if latest and not latest.is_used:
+        elapsed = (datetime.utcnow() - latest.last_sent_at).total_seconds()
+        if elapsed < RESEND_COOLDOWN_SECONDS:
+            wait = int(RESEND_COOLDOWN_SECONDS - elapsed)
+            raise HTTPException(status_code=429, detail=f"Please wait {wait}s before resending.")
+        latest.is_used = True
+        db.commit()
+
+    otp = generate_otp()
+    record = OtpVerification(
+        email=email,
+        purpose="reset",
+        otp_hash=hash_otp(otp),
+        pending_data=None,
+        attempts=0,
+        last_sent_at=datetime.utcnow(),
+        expires_at=otp_expires_at(),
+        is_used=False,
+    )
+    db.add(record)
+    db.commit()
+    send_reset_otp(email, otp)
+    return {"detail": "If this email is registered, a reset code will be sent."}
+
+
+@app.post("/auth/password-reset/verify")
+def password_reset_verify(req: PasswordResetVerifyRequest, db: Session = Depends(get_db)):
+    """Verify reset OTP and update password."""
+    from auth import hash_password
+    from services.email_service import verify_otp_hash, MAX_ATTEMPTS
+
+    email = req.email.strip().lower()
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    record = (
+        db.query(OtpVerification)
+        .filter(
+            OtpVerification.email == email,
+            OtpVerification.purpose == "reset",
+            OtpVerification.is_used == False,
+        )
+        .order_by(OtpVerification.last_sent_at.desc())
+        .first()
+    )
+
+    if not record:
+        raise HTTPException(status_code=400, detail="No pending reset found. Please request a new code.")
+
+    if datetime.utcnow() > record.expires_at:
+        record.is_used = True
+        db.commit()
+        raise HTTPException(status_code=400, detail="Reset code has expired. Please request a new one.")
+
+    if record.attempts >= MAX_ATTEMPTS:
+        record.is_used = True
+        db.commit()
+        raise HTTPException(status_code=400, detail="Too many failed attempts. Please request a new code.")
+
+    if not verify_otp_hash(req.otp.strip(), record.otp_hash):
+        record.attempts += 1
+        db.commit()
+        remaining = MAX_ATTEMPTS - record.attempts
+        raise HTTPException(status_code=400, detail=f"Incorrect code. {remaining} attempt(s) remaining.")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    user.hashed_password = hash_password(req.new_password)
+    record.is_used = True
+    db.commit()
+    return {"detail": "Password updated successfully. You can now log in."}
+
+
+
 @app.post("/auth/login", response_model=TokenResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
     """Login with email + password. Returns JWT token."""
@@ -319,6 +635,13 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="No account found with this email.")
 
+    # Email must be verified (Instructors are auto-verified on register)
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=403,
+            detail="Email not verified. Please complete OTP verification first."
+        )
+
     # Match or update role to the requested role
     role_obj = db.query(Role).filter(Role.name == req.role).first()
     if role_obj and user.role_id != role_obj.id:
@@ -326,7 +649,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    # Password check — allow legacy accounts with no password (name-only auth)
+    # Password check
     if user.hashed_password:
         if not req.password or not verify_password(req.password, user.hashed_password):
             raise HTTPException(status_code=401, detail="Incorrect password.")
@@ -335,96 +658,8 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         if req.password:
             from auth import hash_password
             user.hashed_password = hash_password(req.password)
+            user.email_verified = True
             db.commit()
-
-    role_name = req.role
-    token = create_access_token(
-        {"sub": user.email, "role": role_name},
-        expires_delta=timedelta(hours=24)
-    )
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": {"id": user.id, "name": user.name, "email": user.email, "role": role_name}
-    }
-
-
-@app.post("/auth/google", response_model=TokenResponse)
-def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
-    """
-    Verify Google authentication and log in or register the user.
-    Accepts Google GSI JWT tokens, JSON credential objects, or direct Google emails.
-    """
-    from auth import create_access_token
-    from datetime import timedelta
-    import base64, json as _json
-
-    email = None
-    name = None
-    google_id = None
-    avatar_url = None
-
-    cred = req.credential.strip()
-
-    # Case 1: Standard JWT from Google Identity Services (3 parts, not JSON)
-    if not cred.startswith("{") and cred.count(".") == 2:
-        try:
-            parts = cred.split(".")
-            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
-            google_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
-            email = google_payload.get("email", "").lower()
-            name = google_payload.get("name", "") or email
-            google_id = google_payload.get("sub", "")
-            avatar_url = google_payload.get("picture", "")
-        except Exception:
-            pass
-
-    # Case 2: Direct JSON object string
-    if not email:
-        try:
-            data = _json.loads(cred)
-            email = data.get("email", "").lower()
-            name = data.get("name", "") or email
-            google_id = data.get("sub", data.get("id", f"google_{email}"))
-            avatar_url = data.get("picture", data.get("avatar_url", ""))
-        except Exception:
-            pass
-
-    # Case 3: Direct email passed
-    if not email and "@" in cred:
-        email = cred.lower()
-        name = email.split("@")[0].replace(".", " ").title()
-        google_id = f"google_{email}"
-
-    if not email:
-        raise HTTPException(status_code=400, detail="Could not extract email from Google credential token.")
-
-    role_obj = db.query(Role).filter(Role.name == req.role).first()
-    if not role_obj:
-        raise HTTPException(status_code=400, detail=f"Invalid role: {req.role}")
-
-    # Find or create user
-    user = db.query(User).filter(User.email == email).first()
-    if user:
-        if user.role_id != role_obj.id:
-            user.role_id = role_obj.id
-        if not user.google_id and google_id:
-            user.google_id = google_id
-        if avatar_url and not user.avatar_url:
-            user.avatar_url = avatar_url
-        db.commit()
-        db.refresh(user)
-    else:
-        user = User(
-            name=name or f"{req.role} User",
-            email=email,
-            google_id=google_id,
-            avatar_url=avatar_url,
-            role_id=role_obj.id,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
 
     role_name = req.role
     token = create_access_token(

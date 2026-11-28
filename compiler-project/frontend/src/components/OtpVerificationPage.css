@@ -1,0 +1,224 @@
+/* OtpVerificationPage.css */
+
+.otp-page-container {
+  min-height: 100vh;
+  width: 100%;
+  background-color: #f3f5fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding: 2rem 1rem;
+  box-sizing: border-box;
+}
+
+.otp-card {
+  position: relative;
+  z-index: 10;
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 20px 50px -10px rgba(0,0,0,0.08), 0 10px 25px -5px rgba(0,0,0,0.04);
+  width: 100%;
+  max-width: 440px;
+  padding: 2.5rem 2.5rem 2rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* Back button */
+.otp-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-bottom: 1rem;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+.otp-back-btn:hover { color: #0f172a; }
+
+/* Email icon */
+.otp-icon {
+  width: 72px;
+  height: 72px;
+  background: linear-gradient(135deg, #eff6ff 0%, #e0f2fe 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+  color: #3b82f6;
+}
+
+.otp-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.otp-subtitle {
+  font-size: 0.925rem;
+  color: #64748b;
+  text-align: center;
+  margin: 0 0 1.25rem;
+  line-height: 1.6;
+}
+.otp-subtitle strong { color: #0f172a; }
+
+/* Error / success banners */
+.otp-error, .otp-success {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0.75rem;
+  box-sizing: border-box;
+}
+.otp-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+.otp-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+}
+
+/* Timer */
+.otp-timer {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+.otp-timer strong { color: #0f172a; }
+.otp-timer-warning { color: #d97706; }
+.otp-timer-warning strong { color: #92400e; }
+.otp-timer-expired { color: #dc2626; font-weight: 600; }
+
+/* OTP form */
+.otp-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+/* 6 digit boxes */
+.otp-inputs {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.otp-digit {
+  width: 48px;
+  height: 56px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+  color: #0f172a;
+  background: #f8fafc;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: 'JetBrains Mono', monospace, sans-serif;
+  caret-color: transparent;
+}
+.otp-digit:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  background: #ffffff;
+}
+.otp-digit-filled {
+  border-color: #94a3b8;
+  background: #ffffff;
+}
+.otp-digit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Verify button */
+.otp-verify-btn {
+  width: 100%;
+  padding: 0.85rem;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s, transform 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.otp-verify-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+.otp-verify-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Spinner shared from LoginPage */
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Resend row */
+.otp-resend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.otp-resend-label { font-size: 0.875rem; color: #64748b; }
+.otp-resend-cooldown { font-size: 0.875rem; color: #94a3b8; }
+.otp-resend-btn {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+.otp-resend-btn:hover:not(:disabled) { color: #2563eb; }
+.otp-resend-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 480px) {
+  .otp-card { padding: 2rem 1.25rem 1.5rem; }
+  .otp-digit { width: 40px; height: 48px; font-size: 1.25rem; }
+  .otp-inputs { gap: 7px; }
+}

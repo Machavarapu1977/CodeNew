@@ -29,9 +29,29 @@ class RegisterRequest(BaseModel):
     password: str
     role: str  # "Instructor" or "Student"
 
-class GoogleAuthRequest(BaseModel):
-    credential: str   # Google ID token (JWT from GSI)
-    role: str         # "Instructor" or "Student"
+# OTP / Email verification schemas
+class OtpSendRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str  # "Instructor" | "Student"
+
+class OtpVerifyRequest(BaseModel):
+    email: str
+    otp: str
+    role: str
+
+class OtpResendRequest(BaseModel):
+    email: str
+    purpose: str = "signup"  # "signup" | "reset"
+
+class PasswordResetSendRequest(BaseModel):
+    email: str
+
+class PasswordResetVerifyRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
 
 class CheckFaceRequest(BaseModel):
     image: str

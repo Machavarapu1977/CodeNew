@@ -109,6 +109,26 @@
   gap: 0.5rem;
 }
 
+/* Forgot password row */
+.forgot-password-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 2px;
+}
+.forgot-password-link {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.forgot-password-link:hover { color: #2563eb; }
+
 /* Main Dual Box Layout */
 .login-roles-grid {
   display: flex;

@@ -15,13 +15,31 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=True)  # nullable for legacy/google users
-    google_id = Column(String(255), nullable=True, unique=True)   # for Google OAuth
+    hashed_password = Column(String(255), nullable=True)
+    google_id = Column(String(255), nullable=True, unique=True)   # kept for data-compat, not used
     avatar_url = Column(String(500), nullable=True)
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False)
+    email_verified = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     role = relationship("Role", back_populates="users")
+
+
+class OtpVerification(Base):
+    """Stores pending OTP records for signup and password-reset flows."""
+    __tablename__ = "otp_verifications"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    # purpose: 'signup' | 'reset'
+    purpose = Column(String(20), nullable=False, default="signup")
+    # hashed OTP — never store plaintext
+    otp_hash = Column(String(255), nullable=False)
+    # pending user data for signup (JSON string); null for reset
+    pending_data = Column(Text, nullable=True)
+    attempts = Column(Integer, default=0, nullable=False)
+    last_sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    is_used = Column(Boolean, default=False, nullable=False)
 
 class Question(Base):
     __tablename__ = "questions"
